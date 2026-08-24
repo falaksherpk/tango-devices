@@ -6,4 +6,4 @@ test-runner:
     - echo "Hello from the Tango CI runner"
     - python3 --version
     - python3 -c "import tango; print('PyTango version:', tango.__version__)"
-    - tango_admin --help
+    - which tango_admin
