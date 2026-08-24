@@ -1,0 +1,9 @@
+test-runner:
+  tags:
+    - tango-ci
+  image: gitlab.beamline:5050/beamline/tango-devices/tango-ci:latest
+  script:
+    - echo "Hello from the Tango CI runner"
+    - python3 --version
+    - python3 -c "import tango; print('PyTango version:', tango.__version__)"
+    - tango_admin --help
