@@ -1,0 +1,7 @@
+test-runner:
+  tags:
+    - tango-ci
+  script:
+    - echo "Hello from the Tango CI runner"
+    - python3 --version
+    - uname -a
