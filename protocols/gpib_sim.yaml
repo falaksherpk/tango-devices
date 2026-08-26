@@ -1,0 +1,32 @@
+# pyvisa-sim configuration for Lab 2.4 -- simulates a GPIB-addressed
+# bench multimeter, using the same *IDN?/SCPI style already used for
+# the RS-232 and TCP/IP instruments in Labs 2.1/2.2.
+#
+# GPIB address 22 is arbitrary but realistic -- real GPIB instruments
+# are addressed 0-30 on the bus, commonly set via a front-panel menu
+# or (on older gear) physical DIP switches.
+spec: "1.1"
+devices:
+  fake-multimeter:
+    eom:
+      GPIB INSTR:
+        q: "\n"
+        r: "\n"
+    dialogues:
+      - q: "*IDN?"
+        r: "FAKE-MULTIMETER,MODEL-2026,SN001,V1.0"
+      - q: "*RST"
+    properties:
+      voltage:
+        default: 5.0
+        getter:
+          q: "MEAS:VOLT?"
+          r: "{:.4f}"
+        specs:
+          min: -10.0
+          max: 10.0
+          type: float
+
+resources:
+  GPIB0::22::INSTR:
+    device: fake-multimeter
