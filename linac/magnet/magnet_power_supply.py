@@ -36,7 +36,7 @@ class MagnetPowerSupply(Device):
     ramp_rate = device_property(dtype=float, default_value=5.0)  # A/s
 
     async def init_device(self):
-        await Device.init_device(self)
+        await super().init_device()
         self._setpoint = 0.0
         self._current = 0.0
         self._ramp_task = None
