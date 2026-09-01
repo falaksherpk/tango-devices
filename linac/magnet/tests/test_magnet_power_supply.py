@@ -17,7 +17,8 @@ import time
 from unittest.mock import patch, MagicMock, AsyncMock
 
 import pytest
-from tango import DevState
+import serial
+from tango import DevFailed, DevState
 from tango.test_context import DeviceTestContext
 
 import magnet_power_supply
@@ -65,6 +66,32 @@ def device():
                 process=True,  # required for GreenMode.Asyncio -- see module docstring
             ) as proxy,
         ):
+            yield proxy
+
+
+@pytest.fixture
+def fault_device():
+    """A device that fails at startup: serial.Serial() raises, exercising
+    the Except.throw_exception(...) path added to init_device and, by
+    extension, the is_setpoint_allowed/is_Reset_allowed FAULT-state guards."""
+    with patch.object(magnet_power_supply, "serial") as mock_serial_module:
+        mock_serial_module.SerialException = serial.SerialException
+        mock_serial_module.Serial.side_effect = serial.SerialException(
+            "could not open port"
+        )
+        with (
+            patch.object(
+                magnet_power_supply.redis, "Redis", return_value=AsyncMock()
+            ),
+            DeviceTestContext(
+                magnet_power_supply.MagnetPowerSupply,
+                properties={"ramp_rate": 50.0},
+                process=True,
+            ) as proxy,
+        ):
+            deadline = time.time() + 3
+            while time.time() < deadline and proxy.state() != DevState.FAULT:
+                time.sleep(0.02)
             yield proxy
 
 
@@ -123,3 +150,38 @@ def test_current_alarm_bounds_are_set(device):
     config = device.get_attribute_config("current")
     assert float(config.min_alarm) == -1.0
     assert float(config.max_alarm) == 100.0
+
+
+def test_init_fault_on_serial_connection_failure(fault_device):
+    assert fault_device.state() == DevState.FAULT
+    assert "Failed to open serial port" in fault_device.status()
+
+
+def test_setpoint_write_rejected_when_fault(fault_device):
+    with pytest.raises(DevFailed):
+        fault_device.setpoint = 5.0
+
+
+def test_reset_rejected_when_fault(fault_device):
+    with pytest.raises(DevFailed):
+        fault_device.Reset()
+
+
+def test_init_fault_on_invalid_ramp_rate():
+    with patch.object(magnet_power_supply, "serial") as mock_serial_module:
+        mock_serial_module.Serial.return_value = MagicMock()
+        with (
+            patch.object(
+                magnet_power_supply.redis, "Redis", return_value=AsyncMock()
+            ),
+            DeviceTestContext(
+                magnet_power_supply.MagnetPowerSupply,
+                properties={"ramp_rate": -1.0},
+                process=True,
+            ) as proxy,
+        ):
+            deadline = time.time() + 3
+            while time.time() < deadline and proxy.state() != DevState.FAULT:
+                time.sleep(0.02)
+            assert proxy.state() == DevState.FAULT
+            assert "ramp_rate must be positive" in proxy.status()

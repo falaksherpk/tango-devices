@@ -21,7 +21,7 @@ import asyncio
 
 import redis.asyncio as redis
 import serial
-from tango import DevState, GreenMode
+from tango import AttReqType, DevState, GreenMode
 from tango.server import Device, attribute, command, device_property, run
 
 REDIS_STREAM_KEY = "linac:magnet:q1"
@@ -46,14 +46,25 @@ class MagnetPowerSupply(Device):
 
         self._redis = redis.Redis(host="127.0.0.1", port=6379, decode_responses=True)
 
+        if self.ramp_rate <= 0:
+            msg = f"ramp_rate must be positive, got {self.ramp_rate}"
+            self.error_stream(msg)
+            self.set_status(msg)
+            self.set_state(DevState.FAULT)
+            return
+
         try:
             self._ser = serial.Serial(self.port, baudrate=self.baudrate, timeout=2)
             self._current = await self._query_current()
-            self._setpoint = self._current
-            self.set_state(DevState.ON)
         except (serial.SerialException, OSError, ValueError) as e:
-            self.error_stream(f"Failed to open serial port {self.port}: {e}")
+            msg = f"Failed to open serial port {self.port}: {e}"
+            self.error_stream(msg)
+            self.set_status(msg)
             self.set_state(DevState.FAULT)
+            return
+
+        self._setpoint = self._current
+        self.set_state(DevState.ON)
 
     async def _query_current(self):
         loop = asyncio.get_event_loop()
@@ -99,7 +110,12 @@ class MagnetPowerSupply(Device):
         except asyncio.CancelledError:
             pass
 
-    @attribute(dtype=float, label="Setpoint", unit="A")
+    def is_setpoint_allowed(self, req_type):
+        if req_type == AttReqType.WRITE_REQ:
+            return self.get_state() in (DevState.ON, DevState.MOVING)
+        return True
+
+    @attribute(dtype=float, label="Setpoint", unit="A", memorized=True)
     async def setpoint(self):
         return self._setpoint
 
@@ -119,6 +135,9 @@ class MagnetPowerSupply(Device):
     )
     async def current(self):
         return self._current
+
+    def is_Reset_allowed(self):
+        return self.get_state() in (DevState.ON, DevState.MOVING)
 
     @command
     async def Reset(self):
