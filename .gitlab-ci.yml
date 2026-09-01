@@ -1,6 +1,25 @@
-test-runner:
+stages:
+  - lint
+  - test
+
+lint:
+  stage: lint
   tags:
     - tango-ci
   image: gitlab.beamline:5050/beamline/tango-devices/tango-ci:latest
   script:
-    - python3 -m pytest tests/ -v
+    # Scoped to linac/magnet/ only -- the one directory actually audited
+    # against the TANGO guidelines checklist so far (Part3_TANGO Ch2,
+    # LAB 2.7, 1 Sep 2026). The rest of this repo (Ch1 practice files,
+    # protocols/, zmq_lab/, tests/test_temperature_sensor.py) has real,
+    # known ruff findings (54 as of 1 Sep 2026) not yet triaged -- widen
+    # this scope deliberately, chapter by chapter, not all at once.
+    - ruff check linac/magnet/
+
+test-runner:
+  stage: test
+  tags:
+    - tango-ci
+  image: gitlab.beamline:5050/beamline/tango-devices/tango-ci:latest
+  script:
+    - python3 -m pytest tests/ linac/magnet/tests/ -v

@@ -48,7 +48,10 @@ def main():
                     response = "ERR bad value\r\n"
                     ser.write(response.encode())
                     continue
-                print(f"[fake-magnet-psu] current register set directly to {current:.4f} A")
+                print(
+                    f"[fake-magnet-psu] current register set directly to "
+                    f"{current:.4f} A"
+                )
                 continue
             else:
                 response = "ERR unknown command\r\n"
