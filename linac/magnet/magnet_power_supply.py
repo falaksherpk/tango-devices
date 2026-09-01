@@ -115,7 +115,13 @@ class MagnetPowerSupply(Device):
             return self.get_state() in (DevState.ON, DevState.MOVING)
         return True
 
-    @attribute(dtype=float, label="Setpoint", unit="A", memorized=True)
+    @attribute(
+        dtype=float,
+        label="Setpoint",
+        unit="A",
+        memorized=True,
+        hw_memorized=True,
+    )
     async def setpoint(self):
         return self._setpoint
 
