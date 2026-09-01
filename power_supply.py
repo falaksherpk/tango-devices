@@ -1,4 +1,3 @@
-import tango
 from tango import DevState
 from tango.server import Device, attribute, command, run
 

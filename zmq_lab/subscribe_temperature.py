@@ -14,7 +14,10 @@ def on_temperature_event(event):
         return
     value = event.attr_value.value
     timestamp = event.attr_value.time.todatetime()
-    print(f"[subscriber] change_event received: Temperature={value:.3f}  (device timestamp {timestamp})")
+    print(
+        f"[subscriber] change_event received: Temperature={value:.3f}  "
+        f"(device timestamp {timestamp})"
+    )
 
 
 def main():

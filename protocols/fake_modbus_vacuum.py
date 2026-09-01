@@ -46,7 +46,12 @@ pump_data = SimData(1, count=1, values=0, datatype=DataType.REGISTERS)
 state = {"pump_on": False, "pump_started_at": None, "pressure_at_pump_on": None}
 
 
-async def action(function_code, start_address, address, count, current_registers, set_values):
+# start_address/count are required by pymodbus's own SimDevice(action=...)
+# callback signature (called positionally) -- prefixed with _ since they're
+# genuinely unused by this particular action.
+async def action(
+    function_code, _start_address, address, _count, current_registers, set_values
+):
     # function_code 6 = write single register (pump on/off command)
     if function_code == 6 and address == 1 and set_values is not None:
         pump_on = bool(set_values[0])
@@ -69,10 +74,16 @@ async def action(function_code, start_address, address, count, current_registers
             start_pressure = state["pressure_at_pump_on"]
             simulated_pressure = max(10, int(start_pressure - elapsed * 50))
             current_registers[0] = simulated_pressure
-            print(f"[fake-modbus-vacuum] pressure read -> {simulated_pressure/1000:.3f} mbar "
-                  f"(pump on {elapsed:.1f}s, started from {start_pressure/1000:.3f} mbar)")
+            print(
+                f"[fake-modbus-vacuum] pressure read -> "
+                f"{simulated_pressure/1000:.3f} mbar (pump on {elapsed:.1f}s, "
+                f"started from {start_pressure/1000:.3f} mbar)"
+            )
         else:
-            print(f"[fake-modbus-vacuum] pressure read -> {current_registers[0]/1000:.3f} mbar (pump off)")
+            print(
+                f"[fake-modbus-vacuum] pressure read -> "
+                f"{current_registers[0]/1000:.3f} mbar (pump off)"
+            )
 
     return None
 

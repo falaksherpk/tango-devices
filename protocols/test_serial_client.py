@@ -5,7 +5,6 @@ over the other end of the socat virtual serial pair, prints the reply.
 """
 import serial
 import sys
-import time
 
 PORT = sys.argv[1] if len(sys.argv) > 1 else "/dev/pts/2"
 

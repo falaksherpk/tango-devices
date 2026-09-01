@@ -29,6 +29,7 @@ import redis
 from tango import DevState
 from tango.server import Device, attribute, command, device_property, run
 from pymodbus.client import ModbusTcpClient
+from pymodbus.exceptions import ModbusException
 
 # How much VacuumPressure must change (in mbar) before we bother firing
 # a change_event / Redis push. Without this, the background poll loop
@@ -59,14 +60,18 @@ class ModbusVacuumController(Device):
             if not self._client.connected:
                 raise ConnectionError(f"could not connect to {self.host}:{self.port}")
             self.set_state(DevState.ON)
-        except Exception as e:
-            self.error_stream(f"Failed to connect to Modbus device at {self.host}:{self.port}: {e}")
+        except (ConnectionError, OSError) as e:
+            self.error_stream(
+                f"Failed to connect to Modbus device at {self.host}:{self.port}: {e}"
+            )
             self.set_state(DevState.FAULT)
             return
 
         self.set_change_event("VacuumPressure", True, False)
 
-        self._redis = redis.Redis(host="127.0.0.1", port=6379, decode_responses=True, socket_timeout=10)
+        self._redis = redis.Redis(
+            host="127.0.0.1", port=6379, decode_responses=True, socket_timeout=10
+        )
 
         self._stop_event = threading.Event()
         self._thread = threading.Thread(target=self._poll_loop, daemon=True)
@@ -80,7 +85,9 @@ class ModbusVacuumController(Device):
                         address=0, count=1, device_id=self.modbus_device_id
                     )
                     pressure = result.registers[0] / 1000.0
-                except Exception as e:
+                # AttributeError guards against a malformed/error Modbus
+                # response (missing .registers) since isError() isn't checked above.
+                except (ModbusException, OSError, AttributeError) as e:
                     self.error_stream(f"Poll failed: {e}")
                     time.sleep(1)
                     continue
@@ -89,7 +96,8 @@ class ModbusVacuumController(Device):
 
             if (
                 self._last_pushed_pressure is None
-                or abs(pressure - self._last_pushed_pressure) >= PRESSURE_CHANGE_THRESHOLD
+                or abs(pressure - self._last_pushed_pressure)
+                >= PRESSURE_CHANGE_THRESHOLD
             ):
                 self.push_change_event("VacuumPressure", pressure)
                 try:
@@ -125,13 +133,17 @@ class ModbusVacuumController(Device):
     @command(dtype_out=str)
     def PumpOn(self):
         with self._client_lock:
-            self._client.write_register(address=1, value=1, device_id=self.modbus_device_id)
+            self._client.write_register(
+                address=1, value=1, device_id=self.modbus_device_id
+            )
         return "Pump turned ON"
 
     @command(dtype_out=str)
     def PumpOff(self):
         with self._client_lock:
-            self._client.write_register(address=1, value=0, device_id=self.modbus_device_id)
+            self._client.write_register(
+                address=1, value=0, device_id=self.modbus_device_id
+            )
         return "Pump turned OFF"
 
     def delete_device(self):

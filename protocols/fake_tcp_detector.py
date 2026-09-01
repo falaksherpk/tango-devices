@@ -90,7 +90,9 @@ class DetectorState:
         in __init__, since DetectorState() is constructed at module
         import time, before asyncio.run(main()) has started any event
         loop."""
-        self.redis_client = redis.Redis(host="127.0.0.1", port=6379, decode_responses=True)
+        self.redis_client = redis.Redis(
+            host="127.0.0.1", port=6379, decode_responses=True
+        )
         self._temp_task = asyncio.create_task(self._temperature_loop())
         self._stream_task = asyncio.create_task(self._stream_loop())
 
@@ -186,21 +188,21 @@ def scpi_error(code, message):
     return f'{code},"{message}"'
 
 
-async def cmd_idn(args):
+async def cmd_idn(_args):
     return "FAKE-DETECTOR-2.3"
 
 
-async def cmd_rst(args):
+async def cmd_rst(_args):
     await state.reset()
     return None
 
 
-async def cmd_frame_count(args):
+async def cmd_frame_count(_args):
     async with state.lock:
         return str(state.frame_count)
 
 
-async def cmd_frame_rate_query(args):
+async def cmd_frame_rate_query(_args):
     async with state.lock:
         return f"{state.frame_rate_hz:.2f}"
 
@@ -218,27 +220,27 @@ async def cmd_frame_rate_set(args):
     return None
 
 
-async def cmd_acq_start(args):
+async def cmd_acq_start(_args):
     await state.start_acquisition()
     return None
 
 
-async def cmd_acq_stop(args):
+async def cmd_acq_stop(_args):
     await state.stop_acquisition()
     return None
 
 
-async def cmd_acq_state(args):
+async def cmd_acq_state(_args):
     async with state.lock:
         return state.acq_state
 
 
-async def cmd_temp(args):
+async def cmd_temp(_args):
     async with state.lock:
         return f"{state.temperature:.2f}"
 
 
-async def cmd_syst_err(args):
+async def cmd_syst_err(_args):
     code, message = await state.pop_error()
     return scpi_error(code, message)
 
@@ -277,7 +279,7 @@ async def handle_client(reader, writer):
         while True:
             try:
                 line = await asyncio.wait_for(reader.readline(), timeout=30)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 continue
             if not line:
                 break
@@ -312,7 +314,10 @@ async def handle_client(reader, writer):
                     state.fault_mode = FAULT_NONE
                 break
             if fault == FAULT_TIMEOUT and not is_fault_control_command:
-                print(f"[fake-tcp-detector] SIMULATED FAULT: withholding response to {command_line!r}")
+                print(
+                    f"[fake-tcp-detector] SIMULATED FAULT: withholding response "
+                    f"to {command_line!r}"
+                )
                 continue
 
             print(f"[fake-tcp-detector] received: {command_line!r}")
@@ -324,16 +329,23 @@ async def handle_client(reader, writer):
                     response = scpi_error(-113, "Undefined header") + "\n"
                     writer.write(response.encode())
                     await writer.drain()
-                    print(f"[fake-tcp-detector] unknown query -> sent error reply")
+                    print("[fake-tcp-detector] unknown query -> sent error reply")
                 else:
-                    print(f"[fake-tcp-detector] unknown command -> pushed error to queue, no reply")
+                    print(
+                        "[fake-tcp-detector] unknown command -> "
+                        "pushed error to queue, no reply"
+                    )
                 continue
 
             result = await handler(args)
 
-            if fault == FAULT_BAD_RESPONSE and result is not None and not is_fault_control_command:
+            if (
+                fault == FAULT_BAD_RESPONSE
+                and result is not None
+                and not is_fault_control_command
+            ):
                 result = "GARBLED#$%DATA"
-                print(f"[fake-tcp-detector] SIMULATED FAULT: sending garbled response")
+                print("[fake-tcp-detector] SIMULATED FAULT: sending garbled response")
 
             if result is not None:
                 response = f"{result}\n"
@@ -349,7 +361,8 @@ async def handle_client(reader, writer):
 
 
 async def main():
-    await state.start()  # creates the temperature background task, now that the loop is running
+    # creates the temperature background task, now that the loop is running
+    await state.start()
     server = await asyncio.start_server(handle_client, HOST, PORT)
     print(f"[fake-tcp-detector] listening on {HOST}:{PORT}")
     async with server:

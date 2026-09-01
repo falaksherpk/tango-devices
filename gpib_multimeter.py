@@ -22,6 +22,7 @@ doesn't.
 from tango import DevState
 from tango.server import Device, attribute, command, device_property, run
 import pyvisa
+from pyvisa import VisaIOError
 
 
 class GpibMultimeter(Device):
@@ -46,7 +47,7 @@ class GpibMultimeter(Device):
             )
             self._device_id = self._inst.query("*IDN?")
             self.set_state(DevState.ON)
-        except Exception as e:
+        except (VisaIOError, OSError) as e:
             self.error_stream(f"Failed to open VISA resource {self.resource_name}: {e}")
             self.set_state(DevState.FAULT)
 

@@ -23,7 +23,7 @@ class SerialInstrument(Device):
             self._ser = serial.Serial(self.port, baudrate=self.baudrate, timeout=2)
             self._device_id = self._query("*IDN?")
             self.set_state(DevState.ON)
-        except Exception as e:
+        except (serial.SerialException, OSError) as e:
             self.error_stream(f"Failed to open serial port {self.port}: {e}")
             self.set_state(DevState.FAULT)
 

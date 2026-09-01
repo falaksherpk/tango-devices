@@ -36,7 +36,10 @@ def main():
     c.close()
 
     if r2.registers[0] < r1.registers[0] < r0.registers[0]:
-        print("[test-client] CONFIRMED: pressure is genuinely dropping toward vacuum over time")
+        print(
+            "[test-client] CONFIRMED: pressure is genuinely dropping toward vacuum "
+            "over time"
+        )
     else:
         print("[test-client] WARNING: pressure did not drop as expected")
 

@@ -25,7 +25,9 @@ def main():
     # retries). Blocking commands should be timed by BLOCK, not by the
     # client socket -- set socket_timeout comfortably longer than the
     # longest BLOCK value used anywhere in this script.
-    r = redis.Redis(host="127.0.0.1", port=6379, decode_responses=True, socket_timeout=10)
+    r = redis.Redis(
+        host="127.0.0.1", port=6379, decode_responses=True, socket_timeout=10
+    )
 
     # Create the consumer group if it doesn't already exist.
     # mkstream=True: create the stream itself too, if it doesn't exist
@@ -37,11 +39,16 @@ def main():
         print(f"[consumer] created consumer group {GROUP_NAME!r}")
     except redis.ResponseError as e:
         if "BUSYGROUP" in str(e):
-            print(f"[consumer] consumer group {GROUP_NAME!r} already exists, reusing it")
+            print(
+                f"[consumer] consumer group {GROUP_NAME!r} already exists, reusing it"
+            )
         else:
             raise
 
-    print(f"[consumer] reading as {CONSUMER_NAME!r} in group {GROUP_NAME!r} (Ctrl-C to stop)...")
+    print(
+        f"[consumer] reading as {CONSUMER_NAME!r} in group {GROUP_NAME!r} "
+        f"(Ctrl-C to stop)..."
+    )
 
     try:
         while True:
@@ -57,7 +64,7 @@ def main():
             if not response:
                 continue
 
-            for stream_key, messages in response:
+            for _stream_key, messages in response:
                 for message_id, fields in messages:
                     print(f"[consumer] processing {message_id}: {fields}")
                     # ... real processing (e.g. writing to a database)

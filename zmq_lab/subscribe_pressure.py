@@ -14,15 +14,23 @@ def on_pressure_event(event):
         return
     value = event.attr_value.value
     timestamp = event.attr_value.time.todatetime()
-    print(f"[event-subscriber] change_event: VacuumPressure={value:.4f} mbar  ({timestamp})")
+    print(
+        f"[event-subscriber] change_event: VacuumPressure={value:.4f} mbar  "
+        f"({timestamp})"
+    )
 
 
 def main():
     dp = tango.DeviceProxy("test/vacuum/1")
     event_id = dp.subscribe_event(
-        "VacuumPressure", tango.EventType.CHANGE_EVENT, on_pressure_event, stateless=True
+        "VacuumPressure",
+        tango.EventType.CHANGE_EVENT,
+        on_pressure_event,
+        stateless=True,
     )
-    print("[event-subscriber] subscribed, waiting for pushed events (Ctrl-C to stop)...")
+    print(
+        "[event-subscriber] subscribed, waiting for pushed events (Ctrl-C to stop)..."
+    )
     try:
         while True:
             time.sleep(1)

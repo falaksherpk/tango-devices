@@ -10,6 +10,7 @@ import time
 
 from tango import DevState
 from tango.server import Device, attribute, command, device_property, run
+import contextlib
 
 
 class CommunicationError(Exception):
@@ -35,10 +36,8 @@ class TcpDetector(Device):
 
     def _connect(self):
         if self._sock is not None:
-            try:
+            with contextlib.suppress(OSError):
                 self._sock.close()
-            except OSError:
-                pass
             self._sock = None
         try:
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -58,7 +57,7 @@ class TcpDetector(Device):
         try:
             self._sock.sendall((command_str + "\n").encode())
             response = self._sock.recv(1024)
-        except (socket.timeout, ConnectionError, OSError, AttributeError) as e:
+        except (TimeoutError, ConnectionError, OSError, AttributeError) as e:
             raise CommunicationError(str(e)) from e
         if not response:
             raise CommunicationError("connection closed by remote end (empty read)")
@@ -100,7 +99,9 @@ class TcpDetector(Device):
             self.set_state(DevState.ALARM)
             self.set_status(f"Malformed response from detector: {raw!r}")
             self.error_stream(f"Malformed FrameCount response: {raw!r}")
-            raise MalformedResponseError(f"could not parse FrameCount from {raw!r}") from e
+            raise MalformedResponseError(
+                f"could not parse FrameCount from {raw!r}"
+            ) from e
 
     @command(dtype_in=str, dtype_out=str)
     def Query(self, command_str):

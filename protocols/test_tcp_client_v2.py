@@ -18,7 +18,7 @@ def query(sock, command_str, expect_reply=True):
     sock.settimeout(3)
     try:
         return sock.recv(1024).decode(errors="replace").strip()
-    except socket.timeout:
+    except TimeoutError:
         return "<<NO REPLY -- TIMED OUT>>"
 
 
@@ -63,7 +63,10 @@ def main():
     print("SYST:ERR? (expect 0, No error) ->", query(s, "SYST:ERR?"))
 
     print("\n=== Unknown command handling ===")
-    print("BAD:COMMAND?  (query, expect immediate error reply) ->", query(s, "BAD:COMMAND?"))
+    print(
+        "BAD:COMMAND?  (query, expect immediate error reply) ->",
+        query(s, "BAD:COMMAND?"),
+    )
     query(s, "BAD:COMMAND", expect_reply=False)  # non-query, no reply expected
     print("SYST:ERR? (should show the BAD:COMMAND error) ->", query(s, "SYST:ERR?"))
 
@@ -76,7 +79,10 @@ def main():
     s2 = new_connection()
     query(s2, "SIM:FAULT TIMEOUT", expect_reply=False)
     print("TEMP? while TIMEOUT active ->", query(s2, "TEMP?"))
-    print("SIM:FAULT CLEAR (must bypass the fault) ->", query(s2, "SIM:FAULT CLEAR", expect_reply=False))
+    print(
+        "SIM:FAULT CLEAR (must bypass the fault) ->",
+        query(s2, "SIM:FAULT CLEAR", expect_reply=False),
+    )
     print("TEMP? after CLEAR ->", query(s2, "TEMP?"))
     s2.close()
 

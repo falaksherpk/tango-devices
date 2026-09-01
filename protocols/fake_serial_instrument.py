@@ -33,7 +33,7 @@ def main():
                 print(f"[fake-instrument] sent: {response!r}")
             else:
                 ser.write(b"ERR unknown command\r\n")
-                print(f"[fake-instrument] sent: 'ERR unknown command'")
+                print("[fake-instrument] sent: 'ERR unknown command'")
 
 if __name__ == "__main__":
     main()
