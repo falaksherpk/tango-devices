@@ -51,7 +51,7 @@ class MagnetPowerSupply(Device):
             self._current = await self._query_current()
             self._setpoint = self._current
             self.set_state(DevState.ON)
-        except Exception as e:
+        except (serial.SerialException, OSError, ValueError) as e:
             self.error_stream(f"Failed to open serial port {self.port}: {e}")
             self.set_state(DevState.FAULT)
 
