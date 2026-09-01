@@ -72,8 +72,8 @@ def device():
 @pytest.fixture
 def fault_device():
     """A device that fails at startup: serial.Serial() raises, exercising
-    the Except.throw_exception(...) path added to init_device and, by
-    extension, the is_setpoint_allowed/is_Reset_allowed FAULT-state guards."""
+    the catch-and-set-FAULT path in init_device and, by extension, the
+    is_setpoint_allowed/is_Reset_allowed FAULT-state guards."""
     with patch.object(magnet_power_supply, "serial") as mock_serial_module:
         mock_serial_module.SerialException = serial.SerialException
         mock_serial_module.Serial.side_effect = serial.SerialException(
