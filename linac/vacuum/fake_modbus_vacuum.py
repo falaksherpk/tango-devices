@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
 """
-Fake Modbus TCP vacuum controller for Lab 2.3 -- simulates a PLC-style
-device with holding registers, same register-mapping mental model as
-a real Siemens PLC, just over Modbus instead of PROFIBUS/S7 protocol.
+Fake Modbus TCP vacuum gauge for linac/vacuum/gauge1 (Chapter 5) --
+simulates a PLC-style device with holding registers, same
+register-mapping mental model as a real Siemens PLC, just over Modbus
+instead of PROFIBUS/S7 protocol.
 
-Built on pymodbus 3.15's current SimData/SimDevice architecture (the
-older ModbusSlaveContext/getValues/setValues API is deprecated and
-being removed in pymodbus 4.0). Live register behavior is implemented
-entirely inside the `action` callback, which pymodbus invokes on every
-register access -- no background thread needed.
+Evolved unchanged from the pre-Part-3 exploratory series' Lab 2.3
+(Phases 2-3) -- built on pymodbus 3.15's current SimData/SimDevice
+architecture (the older ModbusSlaveContext/getValues/setValues API is
+deprecated and being removed in pymodbus 4.0). Live register behavior
+is implemented entirely inside the `action` callback, which pymodbus
+invokes on every register access -- no background thread needed.
 
 Register map (protocol addresses, 0-indexed):
   0: VacuumPressure -- scaled integer, real pressure (mbar x 1000)

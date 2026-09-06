@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """
-Quick manual test client for Lab 2.3 -- reads pressure, turns the pump
-on, then reads pressure again after a delay to prove it's genuinely
-dropping over time (driven by the fake controller's action callback).
+Quick manual test client for linac/vacuum/gauge1 (Chapter 5) -- reads
+pressure, turns the pump on, then reads pressure again after a delay
+to prove it's genuinely dropping over time (driven by the fake
+gauge's action callback). Evolved unchanged from the pre-Part-3
+exploratory series' Lab 2.3 (Phases 2-3).
 """
 import time
 from pymodbus.client import ModbusTcpClient
