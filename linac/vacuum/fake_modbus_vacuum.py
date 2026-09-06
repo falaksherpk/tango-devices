@@ -33,13 +33,14 @@ Real issues found building this:
    further down from wherever it currently is.
 """
 import asyncio
+import sys
 import time
 
 from pymodbus.simulator import SimDevice, SimData, DataType
 from pymodbus.server import StartAsyncTcpServer
 
 HOST = "127.0.0.1"
-PORT = 5020  # standard Modbus TCP port
+PORT = int(sys.argv[1]) if len(sys.argv) > 1 else 5020  # standard Modbus TCP port
 
 pressure_data = SimData(0, count=1, values=1000, datatype=DataType.REGISTERS)
 pump_data = SimData(1, count=1, values=0, datatype=DataType.REGISTERS)
