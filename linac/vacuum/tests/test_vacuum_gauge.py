@@ -124,17 +124,29 @@ def test_pressure_decays_from_actual_current_state(device):
     baseline -- otherwise turning the pump on a second time after
     settling at a lower value makes pressure jump back UP, which is
     physically backwards for a vacuum pump."""
-    device.PumpStatus = True
-    time.sleep(2)
-    first_stop_pressure = device.VacuumPressure
-    device.PumpStatus = False
-    time.sleep(0.5)
-    assert device.VacuumPressure == pytest.approx(first_stop_pressure, abs=0.01)
+    # VacuumPressure is served from a cache the poll loop refreshes once a
+    # second, so a read taken shortly after a write can still reflect the
+    # pre-write state. Every reading below is therefore taken only after the
+    # cache has had more than a full poll cycle to settle -- an earlier
+    # version of this test read 0.5s after PumpStatus=False and passed
+    # locally but failed in CI on exactly that race.
+    POLL_SETTLE = 2.5
 
     device.PumpStatus = True
     time.sleep(2)
-    second_reading = device.VacuumPressure
     device.PumpStatus = False
+    time.sleep(POLL_SETTLE)
+    first_stop_pressure = device.VacuumPressure
+
+    # With the pump off, two settled readings must agree: pressure holds.
+    time.sleep(POLL_SETTLE)
+    assert device.VacuumPressure == pytest.approx(first_stop_pressure, abs=0.001)
+
+    device.PumpStatus = True
+    time.sleep(2)
+    device.PumpStatus = False
+    time.sleep(POLL_SETTLE)
+    second_reading = device.VacuumPressure
 
     assert second_reading < first_stop_pressure, (
         f"pressure ({second_reading}) should have continued decaying below "
