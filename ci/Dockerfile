@@ -16,6 +16,7 @@ RUN pip3 install --break-system-packages \
     pytest \
     pyserial \
     redis \
+    pymodbus==3.15.0 \
     ruff==0.16.5
 
 WORKDIR /builds
