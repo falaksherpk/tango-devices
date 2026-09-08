@@ -33,7 +33,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 import tango
-from tango import DevState
+from tango import DevFailed, DevState
 from tango.test_context import DeviceTestContext
 
 import vacuum_gauge
@@ -145,7 +145,10 @@ def test_pressure_decays_from_actual_current_state(device):
 def test_change_event_fires_on_pressure_change(device):
     events = []
     eid = device.subscribe_event(
-        "VacuumPressure", tango.EventType.CHANGE_EVENT, lambda evt: events.append(evt), stateless=True
+        "VacuumPressure",
+        tango.EventType.CHANGE_EVENT,
+        lambda evt: events.append(evt),
+        stateless=True,
     )
     try:
         device.PumpStatus = True
@@ -180,3 +183,110 @@ def test_concurrent_pump_status_writes_are_serialized(device):
 
     assert errors == []
     assert device.state() == DevState.ON
+
+
+# --- FAULT-path coverage (Ch5 LAB 5.6, Finding E) -------------------
+# Ch2's own compliance audit flagged zero FAULT-path test coverage as a
+# real gap. These close it for this device, and lock in the fault
+# behaviour added in LAB 5.6 after live testing showed the
+# carried-forward design stayed ON while blind.
+
+
+@pytest.fixture
+def device_factory():
+    """Yields a callable that starts a device with arbitrary properties,
+    so a test can build deliberately-broken configurations. Unlike the
+    `device` fixture, no fake hardware is started."""
+    contexts = []
+
+    def _make(**properties):
+        ctx = DeviceTestContext(
+            vacuum_gauge.VacuumGauge, properties=properties, process=False
+        )
+        contexts.append(ctx)
+        return ctx.__enter__()
+
+    yield _make
+    for ctx in reversed(contexts):
+        ctx.__exit__(None, None, None)
+
+
+@pytest.mark.parametrize(
+    "bad_properties, expected_in_status",
+    [
+        ({"Port": 0}, "Port must be"),
+        ({"Port": 70000}, "Port must be"),
+        ({"ModbusDeviceId": -1}, "ModbusDeviceId must be"),
+        ({"ModbusDeviceId": 248}, "ModbusDeviceId must be"),
+    ],
+)
+def test_invalid_properties_fault_at_startup(
+    device_factory, bad_properties, expected_in_status
+):
+    """Startup validation rejects out-of-range properties with a clear
+    status, rather than failing obscurely later at connect time."""
+    properties = {"Host": "127.0.0.1", "Port": 5020, "ModbusDeviceId": 1}
+    properties.update(bad_properties)
+    proxy = device_factory(**properties)
+
+    assert proxy.state() == DevState.FAULT
+    assert expected_in_status in proxy.status()
+
+
+def test_unreachable_host_faults_at_startup(device_factory):
+    """A valid-but-unreachable endpoint faults cleanly at startup."""
+    proxy = device_factory(
+        Host="127.0.0.1", Port=get_free_port(), ModbusDeviceId=1
+    )
+
+    assert proxy.state() == DevState.FAULT
+    assert "Failed to connect" in proxy.status()
+
+
+def test_faulted_device_refuses_reads_and_commands(device_factory):
+    """While faulted, the device must not serve a stale cached pressure
+    or accept pump commands -- the core safety fix from LAB 5.6."""
+    proxy = device_factory(
+        Host="127.0.0.1", Port=get_free_port(), ModbusDeviceId=1
+    )
+    assert proxy.state() == DevState.FAULT
+
+    for attr in ("VacuumPressure", "PumpStatus"):
+        with pytest.raises(DevFailed):
+            getattr(proxy, attr)
+
+    for cmd in ("PumpOn", "PumpOff"):
+        with pytest.raises(DevFailed):
+            proxy.command_inout(cmd)
+
+
+def test_faults_on_instrument_loss_then_recovers(device, fake_hardware):
+    """Regression test for the real behaviour found by live testing in
+    LAB 5.6: killing the instrument mid-run must drive the device to
+    FAULT (not leave it ON serving stale data), and it must return to
+    ON by itself once the instrument comes back -- pymodbus reconnects
+    internally, so no hand-written reconnect logic is involved."""
+    assert device.state() == DevState.ON
+
+    stop_proc(fake_hardware["proc"])
+
+    deadline = time.time() + 15
+    while time.time() < deadline and device.state() != DevState.FAULT:
+        time.sleep(0.5)
+    assert device.state() == DevState.FAULT, "device stayed ON while blind"
+    assert "Lost contact" in device.status()
+
+    with pytest.raises(DevFailed):
+        _ = device.VacuumPressure
+
+    # Bring the same port back up and confirm unassisted recovery.
+    fake_hardware["proc"] = subprocess.Popen(
+        [sys.executable, str(SIMULATOR_SCRIPT), str(fake_hardware["port"])]
+    )
+    wait_for_port(fake_hardware["port"])
+
+    deadline = time.time() + 15
+    while time.time() < deadline and device.state() != DevState.ON:
+        time.sleep(0.5)
+    assert device.state() == DevState.ON, "device did not recover on its own"
+    assert device.VacuumPressure > 0
