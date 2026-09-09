@@ -44,11 +44,12 @@ while all three inputs are currently safe. beam_permit is true only
 when inputs are safe AND no fault is latched.
 """
 import asyncio
+import sys
 from pymodbus.simulator import SimData, SimDevice, DataType
 from pymodbus.server import StartAsyncTcpServer
 
 HOST = "127.0.0.1"
-PORT = 5040
+PORT = int(sys.argv[1]) if len(sys.argv) > 1 else 5040
 
 ADDR_DOOR = 0
 ADDR_VACUUM = 1
@@ -97,7 +98,9 @@ def _set_bit(registers, bit_index, value):
         registers[reg_idx] &= ~(1 << bit_offset)
 
 
-async def action(function_code, _start_address, address, _count, current_registers, set_values):
+async def action(
+    function_code, _start_address, address, _count, current_registers, set_values
+):
     if function_code not in (5, 15) or set_values is None:
         return None
 
