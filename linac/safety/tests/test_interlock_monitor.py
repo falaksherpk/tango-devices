@@ -256,3 +256,41 @@ def test_faults_on_instrument_loss_then_recovers(device, fake_hardware):
     while time.time() < deadline and device.state() != DevState.ON:
         time.sleep(0.5)
     assert device.state() == DevState.ON, "device did not recover on its own"
+
+
+def test_recovers_to_alarm_not_on_if_still_tripped(device, fake_hardware):
+    """Untested-until-now path (Ch6 audit Finding B): recovering from
+    FAULT must land in the state that actually matches reality. If the
+    interlock was genuinely tripped at the moment comms return, the
+    device must report ALARM, not silently default to ON."""
+    plc = _raw_plc_client(fake_hardware)
+    plc.write_coil(address=ADDR_DOOR, value=False, device_id=1)
+    time.sleep(1.5)
+    assert device.state() == DevState.ALARM
+    plc.close()
+
+    stop_proc(fake_hardware["proc"])
+    deadline = time.time() + 15
+    while time.time() < deadline and device.state() != DevState.FAULT:
+        time.sleep(0.5)
+    assert device.state() == DevState.FAULT
+
+    # Bring the instrument back WITHOUT clearing the door -- the
+    # interlock is still genuinely tripped when comms return.
+    fake_hardware["proc"] = subprocess.Popen(
+        [sys.executable, str(SIMULATOR_SCRIPT), str(fake_hardware["port"])]
+    )
+    wait_for_port(fake_hardware["port"])
+    new_plc = _raw_plc_client(fake_hardware)
+    new_plc.write_coil(address=ADDR_DOOR, value=False, device_id=1)
+
+    deadline = time.time() + 15
+    while time.time() < deadline and device.state() == DevState.FAULT:
+        time.sleep(0.5)
+
+    assert device.state() == DevState.ALARM, (
+        "device recovered from FAULT but reported the wrong state -- "
+        "the interlock was still genuinely tripped"
+    )
+    assert device.BeamPermit is False
+    new_plc.close()

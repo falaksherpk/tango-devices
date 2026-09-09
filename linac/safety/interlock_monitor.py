@@ -79,7 +79,23 @@ class InterlockMonitor(Device):
             self._client.connect()
             if not self._client.connected:
                 raise ConnectionError(f"could not connect to {self.Host}:{self.Port}")
-        except (ConnectionError, OSError) as e:
+
+            # Real finding: without this, the device sits in DevState.
+            # UNKNOWN (PyTango's real default with no set_state() call --
+            # confirmed live, not assumed) between a successful connect
+            # and the poll thread's first completed cycle, serving the
+            # hardcoded __init__ cache defaults to any client that asks
+            # in that window. One synchronous read closes it entirely.
+            r = self._client.read_coils(address=0, count=6, device_id=1)
+            self._cache = {
+                "door": r.bits[ADDR_DOOR],
+                "vacuum": r.bits[ADDR_VACUUM],
+                "water": r.bits[ADDR_WATER],
+                "permit": r.bits[ADDR_PERMIT],
+                "fault": r.bits[ADDR_FAULT],
+            }
+            self._apply_state_from_cache()
+        except (ConnectionError, OSError, ModbusException, AttributeError) as e:
             msg = f"Failed to connect to interlock PLC at {self.Host}:{self.Port}: {e}"
             self.error_stream(msg)
             self.set_state(DevState.FAULT)
