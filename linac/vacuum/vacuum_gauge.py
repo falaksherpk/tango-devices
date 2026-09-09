@@ -244,6 +244,7 @@ class VacuumGauge(Device):
 
     def delete_device(self):
         self._stop_event.set()
+        self._thread.join(timeout=2)
         super().delete_device()
 
 
