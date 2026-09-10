@@ -17,6 +17,7 @@ RUN pip3 install --break-system-packages \
     pyserial \
     redis \
     pymodbus==3.15.0 \
-    ruff==0.16.5
+    ruff==0.16.5 \
+    sardana==3.7.0
 
 WORKDIR /builds
