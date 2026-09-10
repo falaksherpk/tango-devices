@@ -19,6 +19,19 @@ source (not assumed):
     StateOne(axis)            -> maps the device's real DevState
                                   (ON/MOVING/FAULT all map directly,
                                   1:1, no heuristic needed)
+
+LAB 7.9 compliance audit finding: AddDevice does not fail even when
+the wrapped device is completely unreachable (not running/not
+exported), since tango.DeviceProxy() construction is lazy -- the
+failure previously only surfaced as an unhandled tango.DevFailed on
+the first real call. Confirmed via manual test: killing
+faraday_cup.py entirely (same code shape as this controller) left
+AddDevice silently succeeding, with StateOne raising a raw
+ConnectionFailed instead of returning something distinguishable.
+StateOne now catches tango.DevFailed and maps it to State.Fault with
+a status string that names the real underlying reason, consistent
+with how a live device reporting its own FAULT state (e.g. backend
+instrument lost) already surfaces a real, informative status.
 """
 import tango
 from sardana import State
@@ -26,6 +39,10 @@ from sardana.pool.controller import MotorController
 
 
 class MagnetMotorController(MotorController):
+    """Sardana Motor element wrapping linac/magnet/q1's real DevState and
+    ramp physics directly -- see module docstring for why this isn't a
+    naive attribute-wrapper."""
+
     MaxDevice = 1
 
     ctrl_properties = {
@@ -54,9 +71,13 @@ class MagnetMotorController(MotorController):
         self.proxy = None
 
     def StateOne(self, _axis):
-        dev_state = self.proxy.state()
+        try:
+            dev_state = self.proxy.state()
+            status = self.proxy.status()
+        except tango.DevFailed as e:
+            reason = e.args[0].desc if e.args else str(e)
+            return State.Fault, f"Wrapped device unreachable: {reason}"
         state = self.STATE_MAP.get(dev_state, State.Fault)
-        status = self.proxy.status()
         return state, status
 
     def ReadOne(self, _axis):
