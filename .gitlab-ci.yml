@@ -14,7 +14,7 @@ lint:
     # checklist so far (Part3_TANGO Ch2 LAB 2.7, 1 Sep 2026; Ch3
     # LAB 3.6, 4 Sep 2026; Ch4 compliance audit + CI lab, 4 Sep 2026;
     # Ch5 LAB 5.6 compliance audit, 8 Sep 2026; Ch6 compliance audit,
-    # 9 Sep 2026; Ch7 LAB 7.8-7.9, 10 Sep 2026 -- linac/beam/
+    # 9 Sep 2026; Ch7 LAB 7.8-7.10, 10 Sep 2026 -- linac/beam/
     # genuinely had 13 real ruff findings before this widening, all
     # fixed and reverified live, not just auto-fixed blind). The rest
     # of this repo (Ch1 practice files, protocols/, zmq_lab/,
@@ -31,43 +31,44 @@ test-runner:
   script:
     - python3 -m pytest tests/ linac/vacuum/tests/ linac/safety/tests/ linac/magnet/tests/ linac/camera/tests/ linac/beam/tests/ -v
     # sardana_controllers/tests/ (Ch7 LAB 7.8-7.10, 10 Sep 2026) is
-    # deliberately NOT run here, despite being ruff-linted above.
+    # different from every path above: it connects to the REAL,
+    # persistent Pool_linac_1 / MacroServer_linac / magnet & Faraday
+    # cup device servers running on tango-ds.beamline, not an
+    # ephemeral DeviceTestContext this job provisions itself. This
+    # step now depends on that real Sardana fleet being up when CI
+    # runs -- if the fleet is powered down (it powers down nightly,
+    # per the handbook), this step fails for that reason, not a code
+    # regression.
     #
-    # LAB 7.10 got this fully working once, then reverted it -- worth
-    # recording precisely, since the fix is real and known, just not
-    # applied yet:
+    # TANGO_HOST is required here and NOWHERE ELSE in this pipeline --
+    # every other test path is self-contained via DeviceTestContext,
+    # which never needed a real database.
     #
-    # 1. sardana==3.7.0 needed adding to ci/Dockerfile (done, kept --
-    #    harmless with nothing importing it, needed the moment this
-    #    is re-enabled).
-    # 2. TANGO_HOST=tango-db.beamline:10000 needs setting for this
-    #    invocation only (every other path above is self-contained
-    #    via DeviceTestContext and never needed it).
-    # 3. The real, remaining blocker: tango-ds.beamline's firewall
-    #    (ufw, SSH-only) blocks the actual Pool_linac_1 /
-    #    MacroServer_linac ports from gitlab.beamline. These are
-    #    RANDOM ephemeral ports assigned at each startup (confirmed:
-    #    45657/37145 for Pool, 33773 for MacroServer on 10 Sep 2026),
-    #    not the fixed database port (10000, already allowed on
-    #    tango-db.beamline separately) -- so no fixed firewall rule
-    #    is possible against the current setup.
-    #    Confirmed via a real diagnostic: temporarily disabling ufw
-    #    on tango-ds.beamline made the exact same pipeline step
-    #    succeed (8 passed) with items 1 and 2 above already in
-    #    place, then ufw was re-enabled immediately after.
-    #    Real fix path found and documented, not yet applied: Sardana
-    #    supports fixed ORBendPoint ports precisely for this scenario
-    #    (sardana-controls.org/users/configuration/server.html --
-    #    "necessary to use a fixed port number... when the server
-    #    needs to be accessed from another isolated network"). Once
-    #    Pool_linac_1 and MacroServer_linac are given fixed
-    #    ORBendPoint ports (via beamline-ansible, not this repo) and
-    #    those specific ports are opened in tango-ds.beamline's ufw,
-    #    re-add the line below and this will work exactly as proven:
-    #    TANGO_HOST=tango-db.beamline:10000 python3 -m pytest sardana_controllers/tests/ -v --ignore=sardana_controllers/tests/test_state_one_fault_handling.py
+    # This step's real, final blocker (found and fixed the same day,
+    # 10 Sep 2026): Pool_linac_1 and MacroServer_linac used to bind
+    # to RANDOM ephemeral ports on every startup, which
+    # tango-ds.beamline's firewall (ufw, previously SSH-only) could
+    # never allowlist. Fixed at the root: both now start with fixed
+    # ORBendPoint ports via a Tango DB free property (per
+    # sardana-controls.org/users/configuration/server.html) --
+    # Pool/linac -> giop:tcp:tango-ds.beamline:28366,
+    # MacroServer/linac -> giop:tcp:tango-ds.beamline:28367 -- and
+    # exactly those two ports are now permanently allowed in ufw
+    # alongside SSH. Confirmed reachable from gitlab.beamline via a
+    # real raw-socket test against both ports before this line was
+    # restored. NOTE: this DB property was set directly via
+    # tango.Database().put_property() during this session, not yet
+    # ported into beamline-ansible -- if the fleet is ever rebuilt
+    # from scratch via Ansible without also porting this property,
+    # Pool/MacroServer will fall back to random ports and this step
+    # will start failing again for the same original reason.
     #
-    # test_state_one_fault_handling.py stays excluded even once the
-    # above is fixed -- it kills/restarts a real process local to
-    # tango-ds.beamline via pgrep/subprocess, which cannot work from
-    # a remote CI container regardless of network reachability. Run
-    # it manually, directly on tango-ds.beamline.
+    # test_state_one_fault_handling.py is deliberately EXCLUDED here
+    # (--ignore) and remains manual-only: it kills and restarts the
+    # real linac/beam/faradaycup1 device server process via local
+    # pgrep/subprocess calls, which only ever operate on the host
+    # pytest itself runs on. From a gitlab.beamline CI container that
+    # is a different physical host from tango-ds.beamline, so the
+    # test cannot find the real process at all. Run this file
+    # directly on tango-ds.beamline instead.
+    - TANGO_HOST=tango-db.beamline:10000 python3 -m pytest sardana_controllers/tests/ -v --ignore=sardana_controllers/tests/test_state_one_fault_handling.py
