@@ -20,7 +20,7 @@ lint:
     # zmq_lab/, tests/test_temperature_sensor.py) has real, known ruff
     # findings not yet triaged -- widen this scope deliberately,
     # chapter by chapter, not all at once.
-    - ruff check linac/magnet/ linac/camera/ linac/beam/ linac/vacuum/ linac/safety/
+    - ruff check linac/magnet/ linac/camera/ linac/beam/ linac/vacuum/ linac/safety/ sardana_controllers/
 
 test-runner:
   stage: test
@@ -29,3 +29,17 @@ test-runner:
   image: gitlab.beamline:5050/beamline/tango-devices/tango-ci:latest
   script:
     - python3 -m pytest tests/ linac/vacuum/tests/ linac/safety/tests/ linac/magnet/tests/ linac/camera/tests/ linac/beam/tests/ -v
+    # sardana_controllers/tests/ (Ch7 LAB 7.8-7.9, 10 Sep 2026) is
+    # different from every path above: it connects to the REAL,
+    # persistent Pool_linac_1 / MacroServer_linac / magnet & Faraday
+    # cup device servers running on tango-ds.beamline, not an
+    # ephemeral DeviceTestContext this job provisions itself. This
+    # step now depends on that real Sardana fleet being up when CI
+    # runs -- if the fleet is powered down (it powers down nightly,
+    # per the handbook), this step fails for that reason, not a code
+    # regression. test_state_one_fault_handling.py additionally kills
+    # and restarts the real linac/beam/faradaycup1 device server
+    # process as part of this run -- confirmed to self-heal and pass
+    # reliably in manual testing, but a real collision risk exists if
+    # this job overlaps with someone interactively using that device.
+    - python3 -m pytest sardana_controllers/tests/ -v
