@@ -152,6 +152,16 @@ def test_current_alarm_bounds_are_set(device):
     assert float(config.max_alarm) == 100.0
 
 
+def test_current_value_range_is_set(device):
+    # Added for Ch8's Taurus panel work: a numeric widget's fill bar needs
+    # a real min_value/max_value to render meaningfully -- confirmed via
+    # a real "taurus form" against this device that the bar was always
+    # solid full with no range defined, before this fix.
+    config = device.get_attribute_config("current")
+    assert float(config.min_value) == -1.0
+    assert float(config.max_value) == 100.0
+
+
 def test_init_fault_on_serial_connection_failure(fault_device):
     assert fault_device.state() == DevState.FAULT
     assert "Failed to open serial port" in fault_device.status()

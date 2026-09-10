@@ -136,6 +136,8 @@ class MagnetPowerSupply(Device):
         dtype=float,
         label="Current",
         unit="A",
+        min_value=-1.0,
+        max_value=100.0,
         min_alarm=-1.0,
         max_alarm=100.0,
     )
