@@ -37,9 +37,23 @@ test-runner:
     # step now depends on that real Sardana fleet being up when CI
     # runs -- if the fleet is powered down (it powers down nightly,
     # per the handbook), this step fails for that reason, not a code
-    # regression. test_state_one_fault_handling.py additionally kills
-    # and restarts the real linac/beam/faradaycup1 device server
-    # process as part of this run -- confirmed to self-heal and pass
-    # reliably in manual testing, but a real collision risk exists if
-    # this job overlaps with someone interactively using that device.
-    - python3 -m pytest sardana_controllers/tests/ -v
+    # regression.
+    #
+    # TANGO_HOST is required here and NOWHERE ELSE in this pipeline --
+    # every other test path is self-contained via DeviceTestContext,
+    # which never needed a real database. First attempt at this step
+    # (LAB 7.10, 10 Sep 2026) failed with API_CantConnectToDatabase,
+    # trying to resolve the CI container's own hostname as the Tango
+    # database host, since nothing had ever set this before.
+    #
+    # test_state_one_fault_handling.py is deliberately EXCLUDED here
+    # (--ignore) and remains manual-only: it kills and restarts the
+    # real linac/beam/faradaycup1 device server process via local
+    # pgrep/subprocess calls, which only ever operate on the host
+    # pytest itself runs on. From a gitlab.beamline CI container that
+    # is a different physical host from tango-ds.beamline, so the
+    # test cannot find the real process at all -- confirmed by its
+    # first CI run failing with "expected exactly one running
+    # faradaycup1 process, found []", not a collision, a fundamentally
+    # wrong host. Run this file directly on tango-ds.beamline instead.
+    - TANGO_HOST=tango-db.beamline:10000 python3 -m pytest sardana_controllers/tests/ -v --ignore=sardana_controllers/tests/test_state_one_fault_handling.py
