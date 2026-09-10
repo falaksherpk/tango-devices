@@ -44,24 +44,42 @@ test-runner:
     # every other test path is self-contained via DeviceTestContext,
     # which never needed a real database.
     #
-    # This step's real, final blocker (found and fixed the same day,
-    # 10 Sep 2026): Pool_linac_1 and MacroServer_linac used to bind
-    # to RANDOM ephemeral ports on every startup, which
+    # This step's real blocker (found and fixed the same day,
+    # 10 Sep 2026): every Tango device server this step touches used
+    # to bind to a RANDOM ephemeral port on every startup, which
     # tango-ds.beamline's firewall (ufw, previously SSH-only) could
-    # never allowlist. Fixed at the root: both now start with fixed
-    # ORBendPoint ports via a Tango DB free property (per
-    # sardana-controls.org/users/configuration/server.html) --
-    # Pool/linac -> giop:tcp:tango-ds.beamline:28366,
-    # MacroServer/linac -> giop:tcp:tango-ds.beamline:28367 -- and
-    # exactly those two ports are now permanently allowed in ufw
-    # alongside SSH. Confirmed reachable from gitlab.beamline via a
-    # real raw-socket test against both ports before this line was
-    # restored. NOTE: this DB property was set directly via
-    # tango.Database().put_property() during this session, not yet
-    # ported into beamline-ansible -- if the fleet is ever rebuilt
-    # from scratch via Ansible without also porting this property,
-    # Pool/MacroServer will fall back to random ports and this step
-    # will start failing again for the same original reason.
+    # never allowlist. This took TWO rounds to fully fix, worth
+    # recording precisely since the two mechanisms are genuinely
+    # different:
+    #   - Pool_linac_1 and MacroServer_linac (Sardana servers) picked
+    #     up a fixed port from the documented Sardana-specific
+    #     ORBendPoint free-property mechanism
+    #     (sardana-controls.org/users/configuration/server.html):
+    #       Pool/linac         -> giop:tcp:tango-ds.beamline:28366
+    #       MacroServer/linac  -> giop:tcp:tango-ds.beamline:28367
+    #   - magnet_power_supply/q1 and faraday_cup/faradaycup1 (plain
+    #     PyTango servers, Ch2/Ch4) do NOT read that free property at
+    #     all -- confirmed by testing it first and watching them keep
+    #     landing on random ports regardless. They needed the
+    #     general-purpose `-ORBendPoint` command-line argument
+    #     instead, added directly to their manual startup commands
+    #     in Section 4 of the handbook:
+    #       magnet_power_supply.py q1 -ORBendPoint giop:tcp:tango-ds.beamline:28368
+    #       faraday_cup.py faradaycup1 -ORBendPoint giop:tcp:tango-ds.beamline:28369
+    # All four ports are now permanently allowed in tango-ds.beamline's
+    # ufw alongside SSH, confirmed reachable from gitlab.beamline via
+    # a real raw-socket test against all four before this line was
+    # restored a second time.
+    # NOTE: the Pool/MacroServer DB properties and the two device
+    # servers' -ORBendPoint startup flags were both applied live
+    # during this session, not yet ported into beamline-ansible or
+    # Section 4 of the handbook's documented startup commands -- if
+    # the fleet is rebuilt from scratch, or these two device servers
+    # are ever restarted without the flag, ports revert to random and
+    # this step fails again for the identical original reason. Real
+    # follow-up: port both fixes into beamline-ansible (Pool/MacroServer)
+    # and Section 4 (the two device servers' documented startup
+    # commands).
     #
     # test_state_one_fault_handling.py is deliberately EXCLUDED here
     # (--ignore) and remains manual-only: it kills and restarts the
