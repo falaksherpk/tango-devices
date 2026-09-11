@@ -19,7 +19,18 @@ INSTRUMENTS_FROM_POOL = False
 magnet_form = PanelDescription(
     "Magnet",
     classname="taurus.qt.qtgui.panel:TaurusForm",
-    model=["linac/magnet/q1/current", "linac/magnet/q1/setpoint"],
+    model=[
+        "linac/magnet/q1/state",
+        "linac/magnet/q1/current",
+        "linac/magnet/q1/setpoint",
+    ],
+)
+
+magnet_reset = PanelDescription(
+    "Magnet Reset",
+    classname="taurus.qt.qtgui.button:TaurusCommandButton",
+    model="linac/magnet/q1",
+    widget_properties={"Command": "Reset", "CustomText": "Reset Magnet"},
 )
 
 magnet_trend = PanelDescription(
