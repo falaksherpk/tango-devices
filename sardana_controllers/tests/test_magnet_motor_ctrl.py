@@ -49,6 +49,20 @@ def test_start_one_ramps_to_target(magnet_ctrl):
     start_position = magnet_ctrl.ReadOne(1)
     target = start_position - 2.0  # move down; lab72_proof.py moved up
 
+    # Real device's min_alarm is -1.0 (magnet_power_supply.py). A fixed -2.0
+    # offset assumes at least 2.0 of headroom below wherever the magnet
+    # happens to be sitting -- true throughout Chapter 7's own work, but
+    # found the hard way (Ch8, 11 Sep 2026) not to be a safe assumption: an
+    # interactive Taurus session left the real magnet near 0, and this
+    # test's blind -2.0 crossed the real alarm bound, leaving the device in
+    # a real ALARM state that even a process restart couldn't clear on its
+    # own (setpoint is memorized in the Tango DB, so it replayed the bad
+    # value on every restart) -- required a direct DB property fix. Move up
+    # instead when moving down would be unsafe.
+    min_safe = -1.0 + 1.0  # 1.0 A of margin above the real min_alarm
+    if target < min_safe:
+        target = start_position + 2.0
+
     magnet_ctrl.StartOne(1, target)
 
     deadline = time.time() + 10
