@@ -12,10 +12,10 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 RUN pip3 install --break-system-packages \
-    pytango \
-    pytest \
-    pyserial \
-    redis \
+    pytango==10.3.1 \
+    pytest==9.1.1 \
+    pyserial==3.5 \
+    redis==8.1.0 \
     pymodbus==3.15.0 \
     ruff==0.16.5 \
     sardana==3.7.0
