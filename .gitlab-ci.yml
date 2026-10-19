@@ -8,19 +8,8 @@ lint:
     - tango-ci
   image: gitlab.beamline:5050/beamline/tango-devices/tango-ci:latest
   script:
-    # Scoped to linac/magnet/, linac/camera/, linac/beam/,
-    # linac/vacuum/, linac/safety/, and sardana_controllers/ -- the
-    # directories actually audited against the TANGO guidelines
-    # checklist so far (Part3_TANGO Ch2 LAB 2.7, 1 Sep 2026; Ch3
-    # LAB 3.6, 4 Sep 2026; Ch4 compliance audit + CI lab, 4 Sep 2026;
-    # Ch5 LAB 5.6 compliance audit, 8 Sep 2026; Ch6 compliance audit,
-    # 9 Sep 2026; Ch7 LAB 7.8-7.10, 10 Sep 2026 -- linac/beam/
-    # genuinely had 13 real ruff findings before this widening, all
-    # fixed and reverified live, not just auto-fixed blind). The rest
-    # of this repo (Ch1 practice files, protocols/, zmq_lab/,
-    # tests/test_temperature_sensor.py) has real, known ruff findings
-    # not yet triaged -- widen this scope deliberately, chapter by
-    # chapter, not all at once.
+    # Every Python directory of the repo (the Sept 2026 practice code was
+    # removed in handbook Part 3 Ch23). Settings are in ruff.toml.
     - ruff check linac/magnet/ linac/camera/ linac/beam/ linac/vacuum/ linac/safety/ sardana_controllers/
 
 test-runner:
@@ -29,64 +18,26 @@ test-runner:
     - tango-ci
   image: gitlab.beamline:5050/beamline/tango-devices/tango-ci:latest
   script:
-    - python3 -m pytest tests/ linac/vacuum/tests/ linac/safety/tests/ linac/magnet/tests/ linac/camera/tests/ linac/beam/tests/ -v
-    # sardana_controllers/tests/ (Ch7 LAB 7.8-7.10, 10 Sep 2026) is
-    # different from every path above: it connects to the REAL,
-    # persistent Pool_linac_1 / MacroServer_linac / magnet & Faraday
-    # cup device servers running on tango-ds.beamline, not an
-    # ephemeral DeviceTestContext this job provisions itself. This
-    # step now depends on that real Sardana fleet being up when CI
-    # runs -- if the fleet is powered down (it powers down nightly,
-    # per the handbook), this step fails for that reason, not a code
-    # regression.
-    #
-    # TANGO_HOST is required here and NOWHERE ELSE in this pipeline --
-    # every other test path is self-contained via DeviceTestContext,
-    # which never needed a real database.
-    #
-    # This step's real blocker (found and fixed the same day,
-    # 10 Sep 2026): every Tango device server this step touches used
-    # to bind to a RANDOM ephemeral port on every startup, which
-    # tango-ds.beamline's firewall (ufw, previously SSH-only) could
-    # never allowlist. This took TWO rounds to fully fix, worth
-    # recording precisely since the two mechanisms are genuinely
-    # different:
-    #   - Pool_linac_1 and MacroServer_linac (Sardana servers) picked
-    #     up a fixed port from the documented Sardana-specific
-    #     ORBendPoint free-property mechanism
-    #     (sardana-controls.org/users/configuration/server.html):
-    #       Pool/linac         -> giop:tcp:tango-ds.beamline:28366
-    #       MacroServer/linac  -> giop:tcp:tango-ds.beamline:28367
-    #   - magnet_power_supply/q1 and faraday_cup/faradaycup1 (plain
-    #     PyTango servers, Ch2/Ch4) do NOT read that free property at
-    #     all -- confirmed by testing it first and watching them keep
-    #     landing on random ports regardless. They needed the
-    #     general-purpose `-ORBendPoint` command-line argument
-    #     instead, added directly to their manual startup commands
-    #     in Section 4 of the handbook:
-    #       magnet_power_supply.py q1 -ORBendPoint giop:tcp:tango-ds.beamline:28368
-    #       faraday_cup.py faradaycup1 -ORBendPoint giop:tcp:tango-ds.beamline:28369
-    # All four ports are now permanently allowed in tango-ds.beamline's
-    # ufw alongside SSH, confirmed reachable from gitlab.beamline via
-    # a real raw-socket test against all four before this line was
-    # restored a second time.
-    # NOTE: the Pool/MacroServer DB properties and the two device
-    # servers' -ORBendPoint startup flags were both applied live
-    # during this session, not yet ported into beamline-ansible or
-    # Section 4 of the handbook's documented startup commands -- if
-    # the fleet is rebuilt from scratch, or these two device servers
-    # are ever restarted without the flag, ports revert to random and
-    # this step fails again for the identical original reason. Real
-    # follow-up: port both fixes into beamline-ansible (Pool/MacroServer)
-    # and Section 4 (the two device servers' documented startup
-    # commands).
-    #
-    # test_state_one_fault_handling.py is deliberately EXCLUDED here
-    # (--ignore) and remains manual-only: it kills and restarts the
-    # real linac/beam/faradaycup1 device server process via local
-    # pgrep/subprocess calls, which only ever operate on the host
-    # pytest itself runs on. From a gitlab.beamline CI container that
-    # is a different physical host from tango-ds.beamline, so the
-    # test cannot find the real process at all. Run this file
-    # directly on tango-ds.beamline instead.
+    # Self-contained: each suite starts its devices with DeviceTestContext,
+    # so no Tango database is needed. vacuum/ and safety/ (process=False)
+    # come first, before any suite starts a device in a subprocess.
+    - python3 -m pytest linac/vacuum/tests/ linac/safety/tests/ linac/magnet/tests/ linac/camera/tests/ linac/beam/tests/ -v
+
+test-sardana:
+  stage: test
+  tags:
+    - tango-ci
+  image: gitlab.beamline:5050/beamline/tango-devices/tango-ci:latest
+  # Not self-contained: these tests talk to the real Pool, MacroServer and
+  # device servers on tango-ds.beamline through the real database, so they
+  # need the fleet up and those servers on fixed, firewall-allowed ports
+  # (28366-28369, set up as code in Ch29). Until Ch31 brings Sardana back on
+  # the rebuilt fleet, this job is expected to fail; allow_failure keeps that
+  # visible without turning the pipeline red. Ch31 removes allow_failure.
+  allow_failure: true
+  script:
+    # test_state_one_fault_handling.py stays manual-only: it kills and
+    # restarts the real faradaycup1 process with local pgrep/subprocess,
+    # which cannot reach tango-ds.beamline from this container. Run it on
+    # tango-ds.beamline itself.
     - TANGO_HOST=tango-db.beamline:10000 python3 -m pytest sardana_controllers/tests/ -v --ignore=sardana_controllers/tests/test_state_one_fault_handling.py
