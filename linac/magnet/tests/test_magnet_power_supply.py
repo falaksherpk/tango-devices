@@ -1,10 +1,10 @@
 """
 Part 3 Chapter 2 -- DeviceTestContext pytest suite for MagnetPowerSupply.
 
-Mocks hardware and Redis, not the ramp logic itself -- the point is
-testing the real GreenMode.Asyncio ramp physics (state transitions,
-threshold-gated archiving calls) against a deterministic fake
-"instrument" rather than real serial I/O or a real Redis server.
+Mocks the hardware, not the ramp logic itself -- the point is testing
+the real GreenMode.Asyncio ramp physics (state transitions, settling,
+Init during a ramp) against a deterministic fake "instrument" rather
+than real serial I/O.
 
 Real issue found building this: DeviceTestContext(process=False) --
 running the device server in the SAME process as the test -- segfaults
@@ -14,7 +14,7 @@ running. Fixed by using process=True (a real subprocess), which is
 also closer to how a real device server actually runs in production.
 """
 import time
-from unittest.mock import patch, MagicMock, AsyncMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 import serial
@@ -56,9 +56,6 @@ def device():
                 "_write_current",
                 fake_write_current,
             ),
-            patch.object(
-                magnet_power_supply.redis, "Redis", return_value=AsyncMock()
-            ),
             DeviceTestContext(
                 magnet_power_supply.MagnetPowerSupply,
                 # fast ramp -- tests shouldn't wait on real-world timing
@@ -80,9 +77,6 @@ def fault_device():
             "could not open port"
         )
         with (
-            patch.object(
-                magnet_power_supply.redis, "Redis", return_value=AsyncMock()
-            ),
             DeviceTestContext(
                 magnet_power_supply.MagnetPowerSupply,
                 properties={"ramp_rate": 50.0},
@@ -181,9 +175,6 @@ def test_init_fault_on_invalid_ramp_rate():
     with patch.object(magnet_power_supply, "serial") as mock_serial_module:
         mock_serial_module.Serial.return_value = MagicMock()
         with (
-            patch.object(
-                magnet_power_supply.redis, "Redis", return_value=AsyncMock()
-            ),
             DeviceTestContext(
                 magnet_power_supply.MagnetPowerSupply,
                 properties={"ramp_rate": -1.0},
@@ -195,3 +186,25 @@ def test_init_fault_on_invalid_ramp_rate():
                 time.sleep(0.02)
             assert proxy.state() == DevState.FAULT
             assert "ramp_rate must be positive" in proxy.status()
+
+
+def test_init_during_ramp_stops_the_old_ramp(device):
+    # Init runs delete_device() then init_device(); Tango then restores the
+    # hw_memorized setpoint (50 A here), which starts a new ramp. Reset is a
+    # command, so it leaves the memorized value at 50 but ramps towards 0. If
+    # Init left that Reset ramp running, the two ramps would pull current in
+    # opposite directions and the device would never settle at 50 A.
+    device.setpoint = 50.0  # 1 s ramp at the fixture's 50 A/s
+    time.sleep(0.3)
+    device.Reset()
+    time.sleep(0.1)
+    device.Init()
+    deadline = time.time() + 4
+    while time.time() < deadline:
+        if device.state() == DevState.ON and device.current == pytest.approx(
+            50.0, abs=1e-3
+        ):
+            break
+        time.sleep(0.02)
+    assert device.state() == DevState.ON
+    assert device.current == pytest.approx(50.0, abs=1e-3)
