@@ -208,3 +208,36 @@ def test_init_during_ramp_stops_the_old_ramp(device):
         time.sleep(0.02)
     assert device.state() == DevState.ON
     assert device.current == pytest.approx(50.0, abs=1e-3)
+
+
+def test_status_follows_state_after_recovery():
+    # The first serial open fails (FAULT, with a failure status); a later Init
+    # succeeds. The failure text must not outlive the failure.
+    hw = FakeHardware(initial=0.0)
+
+    async def fake_query_current(self):  # noqa: ARG001
+        return hw.current
+
+    with patch.object(magnet_power_supply, "serial") as mock_serial_module:
+        mock_serial_module.SerialException = serial.SerialException
+        mock_serial_module.Serial.side_effect = [
+            serial.SerialException("could not open port"),
+            MagicMock(),
+        ]
+        with (
+            patch.object(
+                magnet_power_supply.MagnetPowerSupply,
+                "_query_current",
+                fake_query_current,
+            ),
+            DeviceTestContext(
+                magnet_power_supply.MagnetPowerSupply,
+                properties={"ramp_rate": 50.0},
+                process=True,
+            ) as proxy,
+        ):
+            assert proxy.state() == DevState.FAULT
+            assert "Failed to open serial port" in proxy.status()
+            proxy.Init()
+            assert proxy.state() == DevState.ON
+            assert "Failed" not in proxy.status()

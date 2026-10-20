@@ -18,6 +18,7 @@ import contextlib
 
 import serial
 from tango import AttReqType, DevState, GreenMode
+from tango.constants import StatusNotSet
 from tango.server import Device, attribute, command, device_property, run
 
 
@@ -30,6 +31,9 @@ class MagnetPowerSupply(Device):
 
     async def init_device(self):
         await super().init_device()
+        # Clear a status a failed init (or an earlier Init) left behind; with no
+        # explicit status, Tango reports "The device is in <state> state."
+        self.set_status(StatusNotSet)
         self._setpoint = 0.0
         self._current = 0.0
         self._ramp_task = None
