@@ -20,7 +20,10 @@ def on_current_event(event):
 def main():
     dp = tango.DeviceProxy("linac/magnet/q1")
     event_id = dp.subscribe_event(
-        "current", tango.EventType.CHANGE_EVENT, on_current_event, stateless=True
+        "current",
+        tango.EventType.CHANGE_EVENT,
+        on_current_event,
+        sub_mode=tango.EventSubMode.Stateless,
     )
     print("[subscriber] subscribed, waiting for pushed events (Ctrl-C to stop)...")
     try:
