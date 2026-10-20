@@ -24,7 +24,8 @@ import struct
 import sys
 import time
 
-HOST = "0.0.0.0"
+# Localhost only: simulator ports never leave tango-ds (handbook Part 3, Ch25).
+HOST = "127.0.0.1"
 WIDTH = 640
 HEIGHT = 480
 MAGIC = b"CEYG"
@@ -65,7 +66,11 @@ def main() -> None:
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     server.bind((HOST, port))
-    server.listen(1)
+    # Backlog 5, not 1: this simulator accepts the next client only after a send
+    # to the old one fails, so rapid reconnects queue up. A full queue makes the
+    # kernel drop a SYN and the client retry after 1 s; with 1 that happened on
+    # the 3rd back-to-back Reconnect, with 5 on about the 7th (Ch25).
+    server.listen(5)
     print(f"[fake-ceyag-camera] listening on {HOST}:{port}")
 
     try:
