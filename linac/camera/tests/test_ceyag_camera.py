@@ -1,11 +1,10 @@
 """
 Part 3 Chapter 3 -- DeviceTestContext pytest suite for CeYagCamera.
 
-Mocks hardware (a fake TCP camera generating real CEYG-framed bytes)
-and Redis, not the device's own read-loop/throttling logic -- the
-point is testing the real GreenMode.Asyncio frame-reading and
-change_event throttling against a deterministic fake camera, not real
-socket I/O or a real Redis server.
+Mocks the hardware (a fake TCP camera generating real CEYG-framed
+bytes), not the device's own read-loop/throttling logic -- the point is
+testing the real GreenMode.Asyncio frame-reading and change_event
+throttling against a deterministic fake camera, not real socket I/O.
 
 process=True is required for the same reason established in Chapter
 2's magnet test suite: DeviceTestContext(process=False) segfaults for
@@ -13,15 +12,6 @@ GreenMode.Asyncio devices when the test polls the device concurrently
 with its own background asyncio task. This device shares that same
 architecture (a background task reading frames and pushing events),
 so the same finding applies here without needing to be rediscovered.
-
-Following Chapter 2's own precedent: redis.Redis is mocked purely to
-avoid a real Redis dependency in CI. Because process=True forks a
-separate OS process, any mock's recorded calls live in that forked
-child's private memory and are not observable from the test process --
-so, matching Ch2, this suite does not assert anything about what the
-mock's .xadd() received. LAB 3.4's manual live verification (redis-cli
-XRANGE, confirmed against real timing math) is the record that
-archiving actually works; this suite only prevents a hard dependency.
 
 Real issue found building this: the fake hardware's should_fail flag
 was originally a plain Python attribute on FakeCameraHardware. Since
@@ -35,11 +25,11 @@ parent and the forked child can see updates to.
 import multiprocessing
 import struct
 import time
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
 import numpy as np
 import pytest
-from tango import DevState, EventType
+from tango import DevState, EventSubMode, EventType
 from tango.test_context import DeviceTestContext
 
 import ceyag_camera
@@ -50,9 +40,7 @@ MAGIC = ceyag_camera.MAGIC
 
 
 class FakeCameraHardware:
-    """In-memory stand-in for the real TCP camera. Generates real
-    CEYG-framed byte streams on demand, so the device's own framing
-    parser is genuinely exercised, not bypassed.
+    """In-memory stand-in for the real TCP camera.
 
     should_fail is a multiprocessing.Value, not a plain attribute --
     see the module docstring for why a plain attribute doesn't work
@@ -60,9 +48,24 @@ class FakeCameraHardware:
     """
 
     def __init__(self):
+        self.should_fail = multiprocessing.Value("b", 0)
+
+    def connect(self):
+        return _FakeConnection(self)
+
+
+class _FakeConnection:
+    """One connection to the fake camera: its own CEYG-framed stream, as
+    each real TCP connection is, so the device's framing parser is really
+    exercised. After shutdown()/close(), recv_exact() raises, like a real
+    socket -- a worker thread still reading an old connection after
+    Reconnect or Init can't take bytes from the new one."""
+
+    def __init__(self, hw):
+        self._hw = hw
         self._buffer = b""
         self._frame_number = 0
-        self.should_fail = multiprocessing.Value("b", 0)
+        self._closed = False
 
     def _generate_frame_bytes(self):
         self._frame_number += 1
@@ -72,7 +75,9 @@ class FakeCameraHardware:
         return header + payload
 
     def recv_exact(self, n):
-        if self.should_fail.value:
+        if self._closed:
+            raise OSError("connection closed")
+        if self._hw.should_fail.value:
             raise ConnectionError("simulated connection drop")
         time.sleep(0.01)  # keep the fake stream well below a runaway spin rate
         while len(self._buffer) < n:
@@ -80,12 +85,11 @@ class FakeCameraHardware:
         chunk, self._buffer = self._buffer[:n], self._buffer[n:]
         return chunk
 
-
-class _FakeSocketHandle:
-    """Stands in for a real socket object -- only needs a no-op close()."""
+    def shutdown(self, how):  # noqa: ARG002
+        self._closed = True
 
     def close(self):
-        pass
+        self._closed = True
 
 
 @pytest.fixture
@@ -99,10 +103,10 @@ def device(hw):
     # CeYagCamera via patch.object, so their signature must match the
     # original instance methods they stand in for.
     def fake_blocking_connect(self):  # noqa: ARG001
-        return _FakeSocketHandle()
+        return hw.connect()
 
-    def fake_blocking_recv_exact(self, n):  # noqa: ARG001
-        return hw.recv_exact(n)
+    def fake_blocking_recv_exact(self, n):
+        return self._sock.recv_exact(n)
 
     with (
         patch.object(
@@ -113,7 +117,6 @@ def device(hw):
             "_blocking_recv_exact",
             fake_blocking_recv_exact,
         ),
-        patch.object(ceyag_camera.redis, "Redis", return_value=AsyncMock()),
         DeviceTestContext(
             ceyag_camera.CeYagCamera,
             properties={"frame_interval_ms": 100},
@@ -151,7 +154,7 @@ def test_change_event_throttling(device):
             received.append(time.monotonic())
 
     device.subscribe_event(
-        "image", EventType.CHANGE_EVENT, callback, stateless=True
+        "image", EventType.CHANGE_EVENT, callback, sub_mode=EventSubMode.Stateless
     )
     time.sleep(1.0)
 
@@ -198,9 +201,8 @@ def test_init_fault_on_invalid_frame_interval():
         patch.object(
             ceyag_camera.CeYagCamera,
             "_blocking_connect",
-            lambda self: _FakeSocketHandle(),  # noqa: ARG005
+            lambda self: FakeCameraHardware().connect(),  # noqa: ARG005
         ),
-        patch.object(ceyag_camera.redis, "Redis", return_value=AsyncMock()),
         DeviceTestContext(
             ceyag_camera.CeYagCamera,
             properties={"frame_interval_ms": -1},
@@ -212,3 +214,23 @@ def test_init_fault_on_invalid_frame_interval():
             time.sleep(0.02)
         assert proxy.state() == DevState.FAULT
         assert "frame_interval_ms must be positive" in proxy.status()
+
+
+def test_init_leaves_exactly_one_read_loop(device):
+    # Init runs delete_device() then init_device(), which connects and starts
+    # a new read loop. An old loop that survived Init would read the new
+    # connection too (it uses self._sock): two loops splitting one stream
+    # break the framing and the device faults, or frames are counted twice.
+    def rate(seconds=1.0):
+        start = device.frame_count
+        time.sleep(seconds)
+        return (device.frame_count - start) / seconds
+
+    before = rate()
+    device.Init()
+    time.sleep(0.2)
+    after = rate()
+    assert device.state() == DevState.ON
+    assert after == pytest.approx(before, rel=0.4), (
+        f"frame rate {before:.0f}/s before Init, {after:.0f}/s after"
+    )
