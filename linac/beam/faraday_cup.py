@@ -22,7 +22,8 @@ Design notes:
   not archived here (HDB++, Ch30).
 - Poll-loop resilience: exponential backoff (capped) plus an active
   reconnect attempt each cycle while in FAULT, so the device heals
-  itself once the adapter is back.
+  itself once the adapter is back. The backoff resets only after a
+  successful read, not after a successful connect.
 - delete_device() (run before every Init and at server shutdown) cancels
   and awaits the poll task, then closes the link, so no poll loop
   outlives its device. Without it, a server shut down while the loop was
@@ -192,14 +193,17 @@ class FaradayCup(Device):
 
             # Reconnect attempt (outside the read try/except above so a
             # failed reconnect doesn't get misreported as a read error).
+            # The backoff grows either way and resets only after a
+            # successful read: an endpoint that accepts the connection but
+            # can't answer (the adapter with its instrument gone) must not
+            # be redialled at the poll rate (Ch26).
             try:
                 await self._connect_and_setup()
-                log.info("poll loop: reconnect succeeded, backoff reset")
-                backoff_s = interval_s
+                log.info("poll loop: reconnected, next read in %.1f s", backoff_s)
             except (TimeoutError, ConnectionRefusedError, OSError) as reconnect_err:
                 log.error("poll loop: reconnect failed: %s", reconnect_err)
-                backoff_s = min(backoff_s * 2, BACKOFF_CAP_S)
             await asyncio.sleep(backoff_s)
+            backoff_s = min(backoff_s * 2, BACKOFF_CAP_S)
 
     @attribute(dtype=float, label="Current", unit="A",
                format="%.6E")

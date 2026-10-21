@@ -289,3 +289,87 @@ def test_init_leaves_exactly_one_poll_loop(device):
     assert after == pytest.approx(before, rel=0.3), (
         f"poll rate {before:.1f}/s before Init, {after:.1f}/s after"
     )
+
+
+def start_picoammeter(pico_port: int) -> subprocess.Popen:
+    proc = subprocess.Popen(
+        [sys.executable, str(PICOAMMETER_SCRIPT), str(pico_port)]
+    )
+    wait_for_port(pico_port)
+    return proc
+
+
+def test_backs_off_against_a_link_that_accepts_but_cannot_read():
+    # An endpoint that accepts the connection, takes the setup commands and
+    # then closes -- what the adapter did while the instrument behind it was
+    # dead (Ch26). Each connect "succeeds", every read fails. The device
+    # must back off, not reconnect at the poll rate.
+    accepts = []
+    srv = socket.create_server(("127.0.0.1", 0))
+    srv.settimeout(0.2)
+    port = srv.getsockname()[1]
+    stop = threading.Event()
+
+    def serve():
+        while not stop.is_set():
+            try:
+                conn, _ = srv.accept()
+            except TimeoutError:
+                continue
+            accepts.append(time.monotonic())
+            with conn:
+                conn.settimeout(1.0)
+                buf = b""
+                try:
+                    while b"SYST:ZCH OFF" not in buf:
+                        chunk = conn.recv(1024)
+                        if not chunk:
+                            break
+                        buf += chunk
+                except OSError:
+                    pass
+
+    t = threading.Thread(target=serve, daemon=True)
+    t.start()
+    try:
+        with DeviceTestContext(
+            faraday_cup.FaradayCup,
+            properties={
+                "PrologixHost": "127.0.0.1",
+                "PrologixPort": port,
+                "GpibAddress": 22,
+                "PollIntervalMs": 100,
+            },
+            process=True,
+        ) as proxy:
+            time.sleep(4.0)
+            n = len(accepts)
+            assert proxy.state() == DevState.FAULT
+    finally:
+        stop.set()
+        t.join(timeout=2)
+        srv.close()
+    # Measured (Ch26): without backoff 42 connects in 4 s; with it 8 -- 7
+    # from the device (connect, immediate reconnect, then 0.1, 0.2, 0.4,
+    # 0.8, 1.6 s apart) plus one connection carrying a GIOP header, from an
+    # ORB, origin not identified.
+    assert 2 <= n <= 12, f"{n} connects in 4 s"
+
+
+def test_heals_when_instrument_returns_behind_live_adapter(device, fake_hardware):
+    # The instrument dies and comes back; the adapter keeps running, as a real
+    # GPIB-Ethernet adapter would. The device must return to ON by itself.
+    stop_proc(fake_hardware["pico_proc"])
+    deadline = time.time() + 5
+    while time.time() < deadline and device.state() != DevState.FAULT:
+        time.sleep(0.05)
+    assert device.state() == DevState.FAULT
+
+    fake_hardware["pico_proc"] = start_picoammeter(fake_hardware["pico_port"])
+
+    deadline = time.time() + 15
+    while time.time() < deadline and device.state() != DevState.ON:
+        time.sleep(0.05)
+    assert device.state() == DevState.ON
+    value = device.current
+    assert abs(value - BASELINE_CURRENT) < BASELINE_TOLERANCE

@@ -58,7 +58,12 @@ class AdapterState:
 
 class Backend:
     """Single shared connection to the wrapped fake instrument, guarded by
-    a lock — a real GPIB bus is one shared channel, not one-per-client."""
+    a lock — a real GPIB bus is one shared channel, not one-per-client.
+
+    A failed write or read drops the link, and the next command redials
+    it: a real adapter keeps working when the instrument behind it is
+    power-cycled. A command that can't reach the instrument is dropped,
+    as for an address with nothing behind it (Ch26)."""
 
     def __init__(self, host: str, port: int):
         self.host = host
@@ -73,18 +78,43 @@ class Backend:
         log.info("connected to backend instrument at %s:%d",
                   self.host, self.port)
 
-    async def write(self, line: str, eos: int):
+    def _drop(self, why) -> None:
+        log.warning("backend instrument link lost (%s); redialling on the "
+                    "next command", why)
+        if self.writer is not None:
+            self.writer.close()
+        self.reader = self.writer = None
+
+    async def write(self, line: str, eos: int) -> bool:
+        if self.writer is None:
+            try:
+                await self.connect()
+            except OSError as e:
+                log.warning("backend instrument not reachable (%s) — "
+                            "dropping: %r", e, line)
+                return False
         term = EOS_TERMINATORS[eos]
-        self.writer.write((line + term).encode("ascii"))
-        await self.writer.drain()
+        try:
+            self.writer.write((line + term).encode("ascii"))
+            await self.writer.drain()
+        except OSError as e:  # includes ConnectionError (broken pipe, reset)
+            self._drop(e)
+            return False
+        return True
 
     async def read(self, timeout_ms: int) -> str | None:
+        if self.reader is None:
+            return None
         try:
             raw = await asyncio.wait_for(
                 self.reader.readline(), timeout=timeout_ms / 1000)
         except TimeoutError:
             return None
+        except OSError as e:
+            self._drop(e)
+            return None
         if not raw:
+            self._drop("instrument closed the connection")
             return None
         return raw.decode("ascii", errors="replace").rstrip("\r\n")
 
@@ -150,7 +180,8 @@ async def handle_gpib_passthrough(line: str, state: AdapterState,
         return None
 
     async with backend.lock:
-        await backend.write(line, state.eos)
+        if not await backend.write(line, state.eos):
+            return None
         if state.auto:
             return await backend.read(state.read_tmo_ms)
     return None
@@ -180,7 +211,7 @@ async def client_loop(reader: asyncio.StreamReader,
             if response is not None:
                 writer.write((response + "\n").encode("ascii"))
                 await writer.drain()
-    except (ConnectionResetError, asyncio.IncompleteReadError):
+    except (ConnectionError, asyncio.IncompleteReadError):
         pass
     finally:
         log.info("client disconnected: %s", peer)
