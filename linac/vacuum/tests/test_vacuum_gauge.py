@@ -18,28 +18,31 @@ are used per test function rather than mocking pymodbus's
 ModbusTcpClient directly -- it's a real third-party network client,
 not project code, so mocking its internals would be brittle.
 
-redis.Redis is mocked with a plain MagicMock (not AsyncMock, unlike
-Ch4) -- VacuumGauge's Redis usage is genuinely synchronous
-(redis.Redis(...).xadd(...) is a normal blocking call), so AsyncMock
-would be the wrong tool here.
+Ch27 adds the lifetime tests: a device that faulted at startup tears
+down cleanly, Init closes the old Modbus connection and leaves exactly
+one poll loop, and a device started or Init-ed while the instrument is
+down recovers by itself once it comes back.
 """
+import contextlib
 import socket
 import subprocess
 import sys
 import threading
 import time
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 import tango
 from tango import DevFailed, DevState
+from pymodbus.client import ModbusTcpClient
 from tango.test_context import DeviceTestContext
 
 import vacuum_gauge
 
 VACUUM_DIR = Path(__file__).resolve().parent.parent
 SIMULATOR_SCRIPT = VACUUM_DIR / "fake_modbus_vacuum.py"
+POLL_THREAD_NAME = "VacuumGauge-poll"
 
 
 def get_free_port() -> int:
@@ -68,30 +71,43 @@ def stop_proc(proc: subprocess.Popen) -> None:
         proc.wait()
 
 
+def start_simulator(port: int) -> subprocess.Popen:
+    proc = subprocess.Popen([sys.executable, str(SIMULATOR_SCRIPT), str(port)])
+    wait_for_port(port)
+    return proc
+
+
+def poll_threads() -> int:
+    return sum(1 for t in threading.enumerate() if t.name == POLL_THREAD_NAME)
+
+
+def wait_for_state(proxy, state, timeout: float = 15.0) -> None:
+    deadline = time.time() + timeout
+    while time.time() < deadline and proxy.state() != state:
+        time.sleep(0.2)
+    assert proxy.state() == state, f"still {proxy.state()} after {timeout}s"
+
+
 @pytest.fixture
 def fake_hardware():
     port = get_free_port()
-    proc = subprocess.Popen([sys.executable, str(SIMULATOR_SCRIPT), str(port)])
-    wait_for_port(port)
-    state = {"port": port, "proc": proc}
+    state = {"port": port, "proc": start_simulator(port)}
     yield state
-    stop_proc(state["proc"])
+    if state["proc"] is not None:
+        stop_proc(state["proc"])
 
 
 @pytest.fixture
 def device(fake_hardware):
-    with (
-        patch.object(vacuum_gauge.redis, "Redis", return_value=MagicMock()),
-        DeviceTestContext(
-            vacuum_gauge.VacuumGauge,
-            properties={
-                "Host": "localhost",
-                "Port": fake_hardware["port"],
-                "ModbusDeviceId": 1,
-            },
-            process=False,  # empirical: not GreenMode.Asyncio, see module docstring
-        ) as proxy,
-    ):
+    with DeviceTestContext(
+        vacuum_gauge.VacuumGauge,
+        properties={
+            "Host": "127.0.0.1",  # the fake binds IPv4 only
+            "Port": fake_hardware["port"],
+            "ModbusDeviceId": 1,
+        },
+        process=False,  # empirical: not GreenMode.Asyncio, see module docstring
+    ) as proxy:
         yield proxy
 
 
@@ -160,7 +176,7 @@ def test_change_event_fires_on_pressure_change(device):
         "VacuumPressure",
         tango.EventType.CHANGE_EVENT,
         lambda evt: events.append(evt),
-        stateless=True,
+        sub_mode=tango.EventSubMode.Stateless,
     )
     try:
         device.PumpStatus = True
@@ -292,13 +308,127 @@ def test_faults_on_instrument_loss_then_recovers(device, fake_hardware):
         _ = device.VacuumPressure
 
     # Bring the same port back up and confirm unassisted recovery.
-    fake_hardware["proc"] = subprocess.Popen(
-        [sys.executable, str(SIMULATOR_SCRIPT), str(fake_hardware["port"])]
-    )
-    wait_for_port(fake_hardware["port"])
+    fake_hardware["proc"] = start_simulator(fake_hardware["port"])
 
     deadline = time.time() + 15
     while time.time() < deadline and device.state() != DevState.ON:
         time.sleep(0.5)
     assert device.state() == DevState.ON, "device did not recover on its own"
     assert device.VacuumPressure > 0
+
+
+# --- Lifetime across Init and startup (Ch27) -------------------------
+
+
+def test_delete_device_after_startup_fault_does_not_raise(device_factory, capfd):
+    """A device that faulted at startup must tear down cleanly: Init calls
+    delete_device() first, and so does server shutdown."""
+    proxy = device_factory(Host="127.0.0.1", Port=0, ModbusDeviceId=1)
+    assert proxy.state() == DevState.FAULT
+    proxy.Init()
+    proxy.Init()
+    assert "delete_device() raised" not in capfd.readouterr().err
+
+
+def test_init_closes_the_old_connection(device):
+    """Init must close the previous Modbus connection, not leak one per
+    call. Every client the device creates is recorded and kept referenced,
+    so a leaked one cannot be closed behind the device's back by the
+    garbage collector (counting sockets from outside gave 1, 2 or 6 for
+    the same leak, Ch27)."""
+    clients = []
+
+    class RecordingClient(ModbusTcpClient):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            clients.append(self)
+
+    with patch.object(vacuum_gauge, "ModbusTcpClient", RecordingClient):
+        for _ in range(5):
+            device.Init()
+        time.sleep(1.5)
+    assert device.state() == DevState.ON
+    assert len(clients) == 5
+    assert [c.connected for c in clients] == [False] * 4 + [True]
+
+
+def test_init_leaves_exactly_one_poll_loop(device):
+    for _ in range(3):
+        device.Init()
+    time.sleep(1.5)
+    assert device.state() == DevState.ON
+    assert poll_threads() == 1
+
+
+def test_starts_in_fault_then_recovers_when_instrument_appears(device_factory):
+    """Started before its instrument, the device faults with a clear
+    status, then comes to ON by itself once the instrument answers."""
+    port = get_free_port()
+    proxy = device_factory(Host="127.0.0.1", Port=port, ModbusDeviceId=1)
+    assert proxy.state() == DevState.FAULT
+    assert "Failed to connect" in proxy.status()
+
+    proc = start_simulator(port)
+    try:
+        wait_for_state(proxy, DevState.ON)
+        assert proxy.VacuumPressure == pytest.approx(1.0, abs=0.001)
+        assert "Failed" not in proxy.status()
+    finally:
+        stop_proc(proc)
+
+
+@pytest.fixture
+def hung_instrument():
+    """A peer that accepts connections and never answers: a hung PLC."""
+    srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    srv.bind(("127.0.0.1", 0))
+    srv.listen(8)
+    srv.settimeout(0.2)
+    held, stop = [], threading.Event()
+
+    def accept_loop():
+        while not stop.is_set():
+            with contextlib.suppress(OSError):  # the 0.2 s accept timeout
+                held.append(srv.accept()[0])
+
+    t = threading.Thread(target=accept_loop, daemon=True)
+    t.start()
+    yield srv.getsockname()[1]
+    stop.set()
+    t.join(timeout=2)
+    for conn in held:
+        conn.close()
+    srv.close()
+
+
+def test_hung_instrument_faults_and_init_stays_bounded(
+    device_factory, hung_instrument
+):
+    """An instrument that accepts and never answers: the device faults,
+    and Init returns well inside the 3 s client timeout and leaves exactly
+    one poll loop (a poll blocked in a long read must not outlive its
+    device)."""
+    proxy = device_factory(Host="127.0.0.1", Port=hung_instrument, ModbusDeviceId=1)
+    assert proxy.state() == DevState.FAULT
+    for _ in range(2):
+        t0 = time.time()
+        proxy.Init()
+        assert time.time() - t0 < 2.9
+    time.sleep(1.5)
+    assert poll_threads() == 1
+
+
+def test_init_during_outage_then_recovers(device, fake_hardware):
+    """Init while the instrument is down leaves a device that still
+    recovers by itself."""
+    stop_proc(fake_hardware["proc"])
+    fake_hardware["proc"] = None
+    wait_for_state(device, DevState.FAULT)
+
+    device.Init()
+    assert device.state() == DevState.FAULT
+
+    fake_hardware["proc"] = start_simulator(fake_hardware["port"])
+    wait_for_state(device, DevState.ON)
+    assert device.VacuumPressure > 0
+    assert poll_threads() == 1
