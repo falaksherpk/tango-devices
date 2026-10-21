@@ -196,7 +196,9 @@ async def main(listen_port: int, instrument_host: str, instrument_port: int,
     async def handler(reader, writer):
         await client_loop(reader, writer, state, backend, instrument_addr)
 
-    server = await asyncio.start_server(handler, "0.0.0.0", listen_port)
+    # Localhost only: simulator ports never leave tango-ds (handbook Part 3,
+    # Ch26). asyncio's default listen backlog (100) is kept.
+    server = await asyncio.start_server(handler, "127.0.0.1", listen_port)
     log.info("fake Prologix adapter listening on port %d "
               "(instrument addr %d at %s:%d)",
               listen_port, instrument_addr, instrument_host, instrument_port)

@@ -109,7 +109,9 @@ async def main(port: int, baseline_current: float) -> None:
     async def handler(reader, writer):
         await client_loop(reader, writer, state)
 
-    server = await asyncio.start_server(handler, "0.0.0.0", port)
+    # Localhost only: simulator ports never leave tango-ds (handbook Part 3,
+    # Ch26). asyncio's default listen backlog (100) is kept.
+    server = await asyncio.start_server(handler, "127.0.0.1", port)
     log.info("fake picoammeter listening on port %d (baseline=%.3e A)",
               port, baseline_current)
     async with server:
