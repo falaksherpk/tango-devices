@@ -21,7 +21,18 @@ test-runner:
     # Self-contained: each suite starts its devices with DeviceTestContext,
     # so no Tango database is needed. vacuum/ and safety/ (process=False)
     # come first, before any suite starts a device in a subprocess.
-    - python3 -m pytest linac/vacuum/tests/ linac/safety/tests/ linac/magnet/tests/ linac/camera/tests/ linac/beam/tests/ -v
+    # The job also fails on any "Fatal Python error": the forked device
+    # servers' crash traces never failed a test, so they used to pass
+    # unnoticed (handbook Part 3, Ch26). pytest's status is kept in a file,
+    # because a pipe would report tee's.
+    - |
+      { python3 -m pytest linac/vacuum/tests/ linac/safety/tests/ linac/magnet/tests/ linac/camera/tests/ linac/beam/tests/ -v && rc=0 || rc=$?; echo "$rc" > pytest.rc; } 2>&1 | tee pytest.log
+      rc=$(cat pytest.rc)
+      if grep -n "Fatal Python error" pytest.log; then
+        echo "test-runner: crash trace(s) in the log above (pytest exit $rc)"
+        exit 1
+      fi
+      exit "$rc"
 
 test-sardana:
   stage: test
