@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """Tango device server for the Faraday Cup beam-current monitor,
-linac/beam/faradaycup1 (Chapter 4).
+linac/beam/faradaycup1 -- handbook Part 3, Ch26.
 
 Transport: GreenMode.Asyncio, real asyncio TCP client talking to a fake
 Prologix GPIB-ETHERNET adapter (fake_prologix_adapter.py), which itself
 forwards to a fake Keithley 6485-style picoammeter (fake_picoammeter.py).
 
-Design notes (see Chapter 4 doc for full rationale):
+Design notes:
 - zero_check is tracked as device-server-mirrored state, not a live
   hardware readback -- the real Keithley 6485 has no confirmed SCPI query
   for this, and a real ESRF/BLISS bug report (control system for
@@ -16,26 +16,25 @@ Design notes (see Chapter 4 doc for full rationale):
   begin from a known state rather than an assumed one.
 - A single asyncio.Lock serializes every device->adapter command/response
   round trip: one physical GPIB-style channel, no concurrent interleave.
-- Dual archiving (Tango change_event + redis.asyncio Stream, threshold
-  gated) follows the identical pattern established in Ch2/Ch3, scaled to
-  this device's real magnitude (~nA readings, not amps).
-- Poll-loop resilience (added after a real bug found live-testing this
-  chapter): the first version retried at full poll rate forever with no
-  backoff and no reconnect attempt when the adapter link died, producing
-  an unbounded error-log flood and never self-healing. Fixed with
-  exponential backoff (capped) plus an active reconnect attempt each
-  cycle while in FAULT.
+  Opening a new link happens under the same lock and closes the old one
+  first, so Reconnect and the poll loop's own reconnect can't race.
+- current is pushed as a change event on every successful poll. It is
+  not archived here (HDB++, Ch30).
+- Poll-loop resilience: exponential backoff (capped) plus an active
+  reconnect attempt each cycle while in FAULT, so the device heals
+  itself once the adapter is back.
+- delete_device() (run before every Init and at server shutdown) cancels
+  and awaits the poll task, then closes the link, so no poll loop
+  outlives its device. Without it, a server shut down while the loop was
+  retrying a dead adapter aborted (Ch26).
 """
 import asyncio
 import contextlib
 import logging
 
-import redis.asyncio as redis
 from tango import AttReqType, DevState, GreenMode
 from tango.server import Device, attribute, command, device_property, run
 
-REDIS_STREAM_KEY = "linac:beam:faradaycup1"
-CURRENT_CHANGE_THRESHOLD = 1e-11  # A -- scaled to this device's real magnitude
 BACKOFF_CAP_S = 30.0  # ceiling for exponential reconnect backoff
 
 logging.basicConfig(
@@ -55,22 +54,20 @@ class FaradayCup(Device):
 
     async def init_device(self):
         await super().init_device()
-        self.set_state(DevState.INIT)
+        self._poll_task = None
         self._reader = None
         self._writer = None
         self._link_lock = asyncio.Lock()
         self._zero_check = False
-        self._last_pushed_current = None
-        self._redis = redis.Redis(host="127.0.0.1", port=6379,
-                                   decode_responses=True)
+        self._poll_count = 0
+        self.set_state(DevState.INIT)
+        self.set_status("Initialising")
         self.set_change_event("current", True, False)
 
-        # Property validation (compliance audit finding): a real GPIB bus
-        # address is 0-30 (5-bit primary address); PollIntervalMs must be
-        # positive or the poll loop's own sleep() calls misbehave. Fail
-        # loudly at startup rather than silently accepting a nonsense
-        # value and misbehaving later -- same principle as Ch3's
-        # frame_interval_ms validation.
+        # Property validation: a real GPIB bus address is 0-30 (5-bit
+        # primary address); PollIntervalMs must be positive or the poll
+        # loop's own sleep() calls misbehave. Fail loudly at startup
+        # rather than silently accepting a nonsense value.
         if not (0 <= self.GpibAddress <= 30):
             msg = f"GpibAddress must be 0-30, got {self.GpibAddress}"
             log.error("init_device: %s", msg)
@@ -90,22 +87,42 @@ class FaradayCup(Device):
             log.error("init_device: adapter connection failed: %s", e)
             self.set_state(DevState.FAULT)
             self.set_status(f"Adapter connection failed: {e}")
-            self._poll_task = asyncio.ensure_future(self._poll_loop())
-            return
+        else:
+            self.set_state(DevState.ON)
+            self.set_status("Connected, polling")
+        # The poll loop runs in both cases: in FAULT it keeps reconnecting.
+        self._poll_task = asyncio.create_task(self._poll_loop())
 
-        self._poll_task = asyncio.ensure_future(self._poll_loop())
-        self.set_state(DevState.ON)
-        self.set_status("Connected, polling")
+    async def delete_device(self):
+        # Init and server shutdown call this: stop the poll loop before the
+        # device (or the whole server) goes away underneath it.
+        if self._poll_task is not None:
+            self._poll_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._poll_task
+            self._poll_task = None
+        async with self._link_lock:
+            await self._close_link()
+        await super().delete_device()
+
+    async def _close_link(self):
+        """Close the current link, if any. Caller holds _link_lock."""
+        writer, self._reader, self._writer = self._writer, None, None
+        if writer is None:
+            return
+        writer.close()
+        with contextlib.suppress(OSError, TimeoutError):
+            async with asyncio.timeout(1.0):
+                await writer.wait_closed()
 
     async def _connect_and_setup(self):
-        """Serialized on _link_lock for its entire body -- including the
-        connection itself, not just the setup commands -- so a manual
-        Reconnect command can never race the poll loop's own automatic
-        reconnect attempt. A real race here was found and confirmed live
-        (two concurrent Reconnect calls both opened a TCP connection
-        within 2ms of each other, silently orphaning one socket) before
-        this lock was widened to cover the whole method."""
+        """Serialized on _link_lock for its entire body -- closing the old
+        link, opening the new one and sending the setup commands -- so a
+        manual Reconnect can never race the poll loop's own reconnect, and
+        a replaced link is always closed, not left to the garbage
+        collector."""
         async with self._link_lock:
+            await self._close_link()
             self._reader, self._writer = await asyncio.wait_for(
                 asyncio.open_connection(self.PrologixHost, self.PrologixPort),
                 timeout=3.0)
@@ -138,6 +155,8 @@ class FaradayCup(Device):
 
     async def _read_current(self) -> float:
         async with self._link_lock:
+            if self._writer is None:
+                raise ConnectionError("no connection to adapter")
             await self._send_line("READ?")
             await self._send_line("++read")
             reply = await self._read_line(timeout_s=1.0)
@@ -146,27 +165,17 @@ class FaradayCup(Device):
         # Real instrument format, e.g. "+2.718427E-13A"
         return float(reply.rstrip("A"))
 
-    async def _archive_tick(self, value: float):
-        """Dual delivery, one tick: a real Tango change_event AND a Redis
-        Stream entry, threshold-gated so we don't flood either path with
-        near-identical values. Mirrors the magnet's _archive_tick pattern
-        (Part3 Ch2), scaled to this device's real magnitude."""
-        self.push_change_event("current", value)
-        if (
-            self._last_pushed_current is None
-            or abs(value - self._last_pushed_current) >= CURRENT_CHANGE_THRESHOLD
-        ):
-            await self._redis.xadd(REDIS_STREAM_KEY, {"current": f"{value:.6E}"})
-            self._last_pushed_current = value
-
     async def _poll_loop(self):
+        # Cancellation (Init, shutdown) ends the loop at an await; it is
+        # never caught here.
         interval_s = self.PollIntervalMs / 1000.0
         backoff_s = interval_s
         while True:
             if self._writer is not None:
                 try:
                     value = await self._read_current()
-                    await self._archive_tick(value)
+                    self._poll_count += 1
+                    self.push_change_event("current", value)
                     if self.get_state() != DevState.ON:
                         self.set_state(DevState.ON)
                         self.set_status("Connected, polling")
@@ -183,9 +192,6 @@ class FaradayCup(Device):
 
             # Reconnect attempt (outside the read try/except above so a
             # failed reconnect doesn't get misreported as a read error).
-            if self._writer is not None:
-                with contextlib.suppress(OSError):
-                    self._writer.close()
             try:
                 await self._connect_and_setup()
                 log.info("poll loop: reconnect succeeded, backoff reset")
@@ -199,6 +205,10 @@ class FaradayCup(Device):
                format="%.6E")
     async def current(self):
         return await self._read_current()
+
+    @attribute(dtype=int, label="Poll Count")
+    async def poll_count(self):
+        return self._poll_count
 
     @attribute(dtype=bool, label="Zero Check")
     async def zero_check(self):
@@ -219,14 +229,12 @@ class FaradayCup(Device):
     async def Reconnect(self):
         """Re-establish the device->adapter TCP link and replay the setup
         sequence. Cannot fix a broken adapter->instrument link -- that is
-        outside this device's control, same caveat as Ch3's camera
-        Reconnect command re: its own fake simulator."""
-        if self._writer is not None:
-            self._writer.close()
+        outside this device's control, same caveat as the camera's
+        Reconnect re: its own fake simulator."""
         await self._connect_and_setup()
         self.set_state(DevState.ON)
         self.set_status("Reconnected, polling")
 
 
 if __name__ == "__main__":
-    run((FaradayCup,))
+    run((FaradayCup,), green_mode=GreenMode.Asyncio)

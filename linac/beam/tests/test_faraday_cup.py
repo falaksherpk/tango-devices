@@ -1,5 +1,5 @@
 """
-Part 3 Chapter 4 -- DeviceTestContext pytest suite for FaradayCup.
+DeviceTestContext pytest suite for FaradayCup -- handbook Part 3, Ch26.
 
 Architectural difference from Ch2/Ch3, and why this suite's approach
 differs from theirs: this device uses native asyncio.open_connection
@@ -30,11 +30,10 @@ process=True is required for the same reason established in Chapter
 (process=False) segfaults for GreenMode.Asyncio devices under
 concurrent polling. This device shares that architecture.
 
-redis.Redis is mocked to avoid a real Redis dependency in CI, matching
-Ch2/Ch3's precedent -- this suite does not assert anything about what
-the mock's .xadd() received, for the same reason Ch2/Ch3 don't:
-process=True forks a separate OS process, so a mock's recorded calls
-in that forked child are not observable from the test process.
+Ch26: test_init_leaves_exactly_one_poll_loop checks that delete_device()
+stops the poll loop. Without it, a server shut down while its loop was
+retrying a dead adapter aborted (Fatal Python error: Aborted) after the
+test had passed -- invisible to the test itself.
 """
 import socket
 import subprocess
@@ -42,7 +41,6 @@ import sys
 import threading
 import time
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
 
 import pytest
 import tango
@@ -121,19 +119,16 @@ def fake_hardware():
 
 @pytest.fixture
 def device(fake_hardware):
-    with (
-        patch.object(faraday_cup.redis, "Redis", return_value=AsyncMock()),
-        DeviceTestContext(
-            faraday_cup.FaradayCup,
-            properties={
-                "PrologixHost": "localhost",
-                "PrologixPort": fake_hardware["adapter_port"],
-                "GpibAddress": 22,
-                "PollIntervalMs": 100,
-            },
-            process=True,  # required for GreenMode.Asyncio -- see module docstring
-        ) as proxy,
-    ):
+    with DeviceTestContext(
+        faraday_cup.FaradayCup,
+        properties={
+            "PrologixHost": "localhost",
+            "PrologixPort": fake_hardware["adapter_port"],
+            "GpibAddress": 22,
+            "PollIntervalMs": 100,
+        },
+        process=True,  # required for GreenMode.Asyncio -- see module docstring
+    ) as proxy:
         yield proxy
 
 
@@ -230,19 +225,16 @@ def test_invalid_gpib_address_faults_at_startup(fake_hardware):
     fault immediately at startup with a clear message, never attempt
     a connection at all -- same principle as Ch3's frame_interval_ms
     validation."""
-    with (
-        patch.object(faraday_cup.redis, "Redis", return_value=AsyncMock()),
-        DeviceTestContext(
-            faraday_cup.FaradayCup,
-            properties={
-                "PrologixHost": "localhost",
-                "PrologixPort": fake_hardware["adapter_port"],
-                "GpibAddress": 99,
-                "PollIntervalMs": 100,
-            },
-            process=True,
-        ) as proxy,
-    ):
+    with DeviceTestContext(
+        faraday_cup.FaradayCup,
+        properties={
+            "PrologixHost": "localhost",
+            "PrologixPort": fake_hardware["adapter_port"],
+            "GpibAddress": 99,
+            "PollIntervalMs": 100,
+        },
+        process=True,
+    ) as proxy:
         deadline = time.time() + 3
         while time.time() < deadline and proxy.state() != DevState.FAULT:
             time.sleep(0.05)
@@ -278,3 +270,22 @@ def test_fault_and_self_heal_on_adapter_loss(device, fake_hardware):
 
     value = device.current
     assert abs(value - BASELINE_CURRENT) < BASELINE_TOLERANCE
+
+
+def test_init_leaves_exactly_one_poll_loop(device):
+    # Init runs delete_device() then init_device(), which starts a new poll
+    # loop. A loop that survived Init would keep polling too, and poll_count
+    # would grow about twice as fast.
+    def rate(seconds=1.0):
+        start = device.poll_count
+        time.sleep(seconds)
+        return (device.poll_count - start) / seconds
+
+    before = rate()
+    device.Init()
+    time.sleep(0.3)
+    after = rate()
+    assert device.state() == DevState.ON
+    assert after == pytest.approx(before, rel=0.3), (
+        f"poll rate {before:.1f}/s before Init, {after:.1f}/s after"
+    )
