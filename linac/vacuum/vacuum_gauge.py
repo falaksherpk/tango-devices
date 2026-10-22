@@ -31,10 +31,17 @@ Lifetime (Ch27): delete_device() stops and joins the poll thread and
 closes the Modbus connection. Init and server shutdown both call it, so
 Init leaves exactly one poll thread and one connection.
 
-PumpStatus is memorized (hw_memorized): when the instrument answers at
-startup, the device writes the last value back, so a restart restarts
-the pump. If the instrument is down at startup, that restore is refused
-(the device is in FAULT) and the pump stays as it is after recovery.
+PumpStatus is memorized (hw_memorized). When the instrument answers at
+startup, Tango writes the last value back, so a restart restarts the
+pump. When it doesn't, the device is in FAULT and Tango refuses the
+restore, and remembers that (observed live in Ch27): once the device
+has recovered, clients see ALARM with "Memorized attribute PumpStatus
+has failed during device startup sequence", and reads of PumpStatus
+return the refused write's error, while VacuumPressure is served. A
+write of PumpStatus clears it (False keeps the pump off); Init with the
+instrument up runs the restore again, which starts the pump if the
+stored value is true. Only writes of the attribute are memorized, not
+the PumpOn/PumpOff commands.
 """
 import threading
 
