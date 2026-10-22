@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-linac/safety/interlock1 (Chapter 6) -- Tango device server reading a
-PLC-style Modbus TCP safety interlock. Same abstraction pattern as
-every prior linac/ device: the transport is new, the Tango-facing
-shape isn't.
+linac/safety/interlock1 (Chapter 6, rebuilt in Chapter 28) -- Tango
+device server reading a PLC-style Modbus TCP safety interlock. Same
+abstraction pattern as every prior linac/ device: the transport is new,
+the Tango-facing shape isn't.
 
 Design decision, made before any code (see the real facility
 precedent cited in fake_modbus_plc.py): this device is a supervisory
@@ -13,30 +13,32 @@ performs (Reset) only requests an acknowledgement the PLC itself may
 refuse (if a fault's cause still persists) -- it never asserts the
 permit or the fault bits directly.
 
-DevState carries real, distinct meaning here (first use of ALARM in
-this project -- Ch2 only used attribute-level alarm *bounds*, never
-device-state ALARM):
+DevState carries real, distinct meaning here:
   ON     -- healthy comms, BeamPermit is True
   ALARM  -- healthy comms, BeamPermit is False (a genuine, correctly-
-            reported safety condition -- not a malfunction)
-  FAULT  -- comms to the PLC lost; per Ch5's Finding E/G precedent,
-            refuses to serve stale attribute values while faulted,
-            and self-heals automatically once comms return
+            reported safety condition -- not a malfunction; the
+            attributes are served and Reset is allowed)
+  FAULT  -- no answer from the PLC (at startup, or 3 failed polls in a
+            row); refuses to serve stale attribute values while
+            faulted, and returns to ON or ALARM by itself once the PLC
+            answers again -- also when it was started or Init-ed while
+            the PLC was down (Ch28)
 
-Thread-safety and fault-handling design carried forward directly from
-Ch5's VacuumGauge (proven, not reinvented): a single threading.Lock
-around every Modbus call (the poll loop and the Reset command both
-touch the client), a consecutive-failure counter before declaring
-FAULT, and startup property validation built in from the start this
-time rather than added by a later audit retrofit.
+Thread-safety and lifetime as in Ch27's VacuumGauge: one threading.Lock
+around every Modbus call (the poll loop and the Reset command both use
+the client), a consecutive-failure counter before declaring FAULT, a
+synchronous first read, a poll thread that runs whenever the properties
+are valid, and a delete_device() that stops and joins it and closes the
+connection. The device has no memorized attributes.
 """
 import threading
-import time
 
-from tango import DevState
-from tango.server import Device, attribute, command, device_property, run
+import tango
 from pymodbus.client import ModbusTcpClient
 from pymodbus.exceptions import ModbusException
+from tango import DevState
+from tango.constants import StatusNotSet
+from tango.server import Device, attribute, command, device_property, run
 
 ADDR_DOOR = 0
 ADDR_VACUUM = 1
@@ -44,8 +46,23 @@ ADDR_WATER = 2
 ADDR_PERMIT = 3
 ADDR_FAULT = 4
 ADDR_RESET = 5
+COIL_COUNT = 6
+PLC_DEVICE_ID = 1
 
+# Consecutive failed polls before the device declares itself FAULT.
 POLL_FAILURE_THRESHOLD = 3
+
+POLL_INTERVAL_S = 1.0
+POLL_THREAD_NAME = "InterlockMonitor-poll"
+
+# pymodbus's defaults (timeout=3, retries=3) let one call block for 12 s
+# against a PLC that accepts and never answers (measured in Ch27 and again
+# in Ch28), holding the lock all that time. One attempt of 1 s bounds every
+# Modbus call; the device's own failure counter above is the retry policy.
+MODBUS_TIMEOUT_S = 1.0
+MODBUS_RETRIES = 0
+# Longest a blocked poll can take to notice the stop event, plus margin.
+THREAD_JOIN_TIMEOUT_S = MODBUS_TIMEOUT_S * (MODBUS_RETRIES + 1) + POLL_INTERVAL_S + 2
 
 
 class InterlockMonitor(Device):
@@ -55,60 +72,68 @@ class InterlockMonitor(Device):
 
     def init_device(self):
         Device.init_device(self)
+        # Clear a status a failed init (or an earlier Init) left behind.
+        self.set_status(StatusNotSet)
         self._client_lock = threading.Lock()
         self._poll_failures = 0
+        self._cache = None
         self._client = None
+        self._thread = None
+        # Created before any early return, so delete_device() can always
+        # use them, even if this device faults during startup.
         self._stop_event = threading.Event()
-        self._cache = {
-            "door": False,
-            "vacuum": False,
-            "water": False,
-            "permit": False,
-            "fault": False,
-        }
 
         if not 1 <= self.Port <= 65535:
-            msg = f"Port must be 1-65535, got {self.Port}"
-            self.error_stream(msg)
-            self.set_state(DevState.FAULT)
-            self.set_status(msg)
+            self._fault(f"Port must be 1-65535, got {self.Port}")
             return
 
+        self._client = ModbusTcpClient(
+            self.Host, port=self.Port, timeout=MODBUS_TIMEOUT_S, retries=MODBUS_RETRIES
+        )
+
+        # A synchronous first read: the device is ON or ALARM with real
+        # coil values before init_device() returns, or FAULT with the
+        # reason -- never UNKNOWN serving defaults (Ch6 Finding A).
         try:
-            self._client = ModbusTcpClient(self.Host, port=self.Port)
-            self._client.connect()
-            if not self._client.connected:
-                raise ConnectionError(f"could not connect to {self.Host}:{self.Port}")
-
-            # Real finding: without this, the device sits in DevState.
-            # UNKNOWN (PyTango's real default with no set_state() call --
-            # confirmed live, not assumed) between a successful connect
-            # and the poll thread's first completed cycle, serving the
-            # hardcoded __init__ cache defaults to any client that asks
-            # in that window. One synchronous read closes it entirely.
-            r = self._client.read_coils(address=0, count=6, device_id=1)
-            self._cache = {
-                "door": r.bits[ADDR_DOOR],
-                "vacuum": r.bits[ADDR_VACUUM],
-                "water": r.bits[ADDR_WATER],
-                "permit": r.bits[ADDR_PERMIT],
-                "fault": r.bits[ADDR_FAULT],
-            }
+            self._cache = self._read_coils()
             self._apply_state_from_cache()
-        except (ConnectionError, OSError, ModbusException, AttributeError) as e:
-            msg = f"Failed to connect to interlock PLC at {self.Host}:{self.Port}: {e}"
-            self.error_stream(msg)
-            self.set_state(DevState.FAULT)
-            self.set_status(msg)
-            return
+        except (ModbusException, OSError, AttributeError) as e:
+            self._fault(
+                f"Failed to connect to interlock PLC at {self.Host}:{self.Port}: {e}"
+            )
 
-        self._thread = threading.Thread(target=self._poll_loop, daemon=True)
+        # Started on both paths: a device that faulted at startup heals
+        # by itself once the PLC answers.
+        self._thread = threading.Thread(
+            target=self._poll_loop, name=POLL_THREAD_NAME, daemon=True
+        )
         self._thread.start()
+
+    def _fault(self, msg):
+        self.error_stream(msg)
+        self.set_state(DevState.FAULT)
+        self.set_status(msg)
+
+    def _read_coils(self):
+        with self._client_lock:
+            result = self._client.read_coils(
+                address=0, count=COIL_COUNT, device_id=PLC_DEVICE_ID
+            )
+        # A Modbus exception response has no .bits: AttributeError is
+        # caught by the callers like a failed read.
+        bits = result.bits
+        return {
+            "door": bits[ADDR_DOOR],
+            "vacuum": bits[ADDR_VACUUM],
+            "water": bits[ADDR_WATER],
+            "permit": bits[ADDR_PERMIT],
+            "fault": bits[ADDR_FAULT],
+        }
 
     def _apply_state_from_cache(self):
         if self._cache["permit"]:
             self.set_state(DevState.ON)
-            self.set_status("The device is in ON state.")
+            self.set_status(StatusNotSet)
         else:
             self.set_state(DevState.ALARM)
             self.set_status(
@@ -120,46 +145,48 @@ class InterlockMonitor(Device):
             )
 
     def _poll_loop(self):
-        while not self._stop_event.is_set():
-            with self._client_lock:
-                try:
-                    r = self._client.read_coils(address=0, count=6, device_id=1)
-                    bits = r.bits[:6]
-                except (ModbusException, OSError, AttributeError) as e:
-                    self._poll_failures += 1
-                    self.error_stream(
-                        f"Poll failed ({self._poll_failures} consecutive): {e}"
-                    )
-                    if self._poll_failures >= POLL_FAILURE_THRESHOLD:
-                        self.set_state(DevState.FAULT)
-                        self.set_status(
-                            f"Lost contact with interlock PLC at "
-                            f"{self.Host}:{self.Port} after "
-                            f"{self._poll_failures} consecutive failed polls. "
-                            f"Last error: {e}"
-                        )
-                    time.sleep(1)
-                    continue
-
-            if self._poll_failures:
+        while not self._stop_event.wait(POLL_INTERVAL_S):
+            try:
+                cache = self._read_coils()
+            except (ModbusException, OSError, AttributeError) as e:
+                if self._stop_event.is_set():
+                    return
+                self._poll_failures += 1
                 self.error_stream(
-                    f"Modbus contact restored after {self._poll_failures} "
-                    f"failed polls"
+                    f"Poll failed ({self._poll_failures} consecutive): {e}"
                 )
+                if self._poll_failures >= POLL_FAILURE_THRESHOLD:
+                    self.set_state(DevState.FAULT)
+                    self.set_status(
+                        f"Lost contact with interlock PLC at "
+                        f"{self.Host}:{self.Port} after "
+                        f"{self._poll_failures} consecutive failed polls. "
+                        f"Last error: {e}"
+                    )
+                continue
+
+            if self._stop_event.is_set():
+                return
+
+            # A good read clears the failure streak; a device that was
+            # FAULT (at startup or later) returns to whichever of ON or
+            # ALARM the PLC reports. Recovery is good news: INFO, not ERROR.
+            if self._poll_failures or self.get_state() == DevState.FAULT:
+                after = (
+                    f"{self._poll_failures} failed polls"
+                    if self._poll_failures
+                    else "a failed first read"
+                )
+                self.info_stream(f"Contact with interlock PLC restored after {after}")
                 self._poll_failures = 0
 
-            self._cache = {
-                "door": bits[ADDR_DOOR],
-                "vacuum": bits[ADDR_VACUUM],
-                "water": bits[ADDR_WATER],
-                "permit": bits[ADDR_PERMIT],
-                "fault": bits[ADDR_FAULT],
-            }
+            self._cache = cache
             self._apply_state_from_cache()
-            time.sleep(1)
 
     def _is_operational(self):
-        return self.get_state() != DevState.FAULT
+        # ALARM is a healthy state here (comms fine, interlock tripped):
+        # the coils are served and Reset must be allowed in it.
+        return self.get_state() in (DevState.ON, DevState.ALARM)
 
     @attribute(dtype=bool, label="Beam Permit")
     def BeamPermit(self):
@@ -198,16 +225,46 @@ class InterlockMonitor(Device):
 
     @command(dtype_out=str)
     def Reset(self):
-        with self._client_lock:
-            self._client.write_coil(address=ADDR_RESET, value=True, device_id=1)
+        """Request a reset of the latched fault. The PLC clears the latch
+        only if every input is safe; the result shows in FaultLatched and
+        the state at the next poll (within POLL_INTERVAL_S)."""
+        try:
+            with self._client_lock:
+                result = self._client.write_coil(
+                    address=ADDR_RESET, value=True, device_id=PLC_DEVICE_ID
+                )
+        except (ModbusException, OSError) as e:
+            tango.Except.throw_exception(
+                "InterlockMonitor_ResetNotDelivered",
+                f"Reset not delivered to the interlock PLC at "
+                f"{self.Host}:{self.Port}: {e}",
+                "InterlockMonitor.Reset",
+            )
+        if result.isError():
+            tango.Except.throw_exception(
+                "InterlockMonitor_ResetRefused",
+                f"The interlock PLC refused the reset write: {result}",
+                "InterlockMonitor.Reset",
+            )
         return "Reset requested"
 
     def is_Reset_allowed(self):
         return self._is_operational()
 
     def delete_device(self):
+        # Init and server shutdown call this: stop the poll thread first,
+        # so it can't touch a deleted device, then close the connection
+        # so Init doesn't leak one.
         self._stop_event.set()
-        self._thread.join(timeout=2)
+        if self._thread is not None:
+            self._thread.join(timeout=THREAD_JOIN_TIMEOUT_S)
+            if self._thread.is_alive():
+                self.error_stream("poll thread did not stop within its timeout")
+            self._thread = None
+        if self._client is not None:
+            with self._client_lock:
+                self._client.close()
+            self._client = None
         super().delete_device()
 
 
