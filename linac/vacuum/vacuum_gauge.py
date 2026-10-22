@@ -124,6 +124,7 @@ class VacuumGauge(Device):
             self._pressure = self._read_pressure()
             self.set_state(DevState.ON)
         except (ModbusException, OSError, AttributeError) as e:
+            self._drop_connection()
             self._fault(
                 f"Failed to connect to Modbus device at {self.Host}:{self.Port}: {e}"
             )
@@ -139,6 +140,26 @@ class VacuumGauge(Device):
         self.error_stream(msg)
         self.set_state(DevState.FAULT)
         self.set_status(msg)
+
+    def _drop_connection(self):
+        # After any failed call the connection can't be trusted: a timed-out
+        # read may still get its late reply, and pymodbus 3.15 keeps the
+        # socket after a timeout and after a plain OSError. Found live in
+        # Ch28 (interlock, same client pattern): an instrument hung, then its
+        # peer closed, and every poll failed with EPIPE on that dead socket
+        # until Init. Closing here makes the next call connect afresh.
+        with self._client_lock:
+            self._client.close()
+
+    def _call(self, fn, **kwargs):
+        """One Modbus call under the lock; on failure, drop the connection
+        and re-raise (Tango reports it to the caller as DevFailed)."""
+        try:
+            with self._client_lock:
+                return fn(device_id=self.ModbusDeviceId, **kwargs)
+        except (ModbusException, OSError):
+            self._drop_connection()
+            raise
 
     def _read_pressure(self):
         with self._client_lock:
@@ -156,6 +177,7 @@ class VacuumGauge(Device):
             except (ModbusException, OSError, AttributeError) as e:
                 if self._stop_event.is_set():
                     return
+                self._drop_connection()
                 self._poll_failures += 1
                 self.error_stream(
                     f"Poll failed ({self._poll_failures} consecutive): {e}"
@@ -216,28 +238,19 @@ class VacuumGauge(Device):
         hw_memorized=True,
     )
     def PumpStatus(self):
-        with self._client_lock:
-            result = self._client.read_holding_registers(
-                address=1, count=1, device_id=self.ModbusDeviceId
-            )
+        result = self._call(self._client.read_holding_registers, address=1, count=1)
         return bool(result.registers[0])
 
     @PumpStatus.setter
     def PumpStatus(self, value):
-        with self._client_lock:
-            self._client.write_register(
-                address=1, value=int(value), device_id=self.ModbusDeviceId
-            )
+        self._call(self._client.write_register, address=1, value=int(value))
 
     def is_PumpStatus_allowed(self, _req_type):
         return self._is_operational()
 
     @command(dtype_out=str)
     def PumpOn(self):
-        with self._client_lock:
-            self._client.write_register(
-                address=1, value=1, device_id=self.ModbusDeviceId
-            )
+        self._call(self._client.write_register, address=1, value=1)
         return "Pump turned ON"
 
     def is_PumpOn_allowed(self):
@@ -245,10 +258,7 @@ class VacuumGauge(Device):
 
     @command(dtype_out=str)
     def PumpOff(self):
-        with self._client_lock:
-            self._client.write_register(
-                address=1, value=0, device_id=self.ModbusDeviceId
-            )
+        self._call(self._client.write_register, address=1, value=0)
         return "Pump turned OFF"
 
     def is_PumpOff_allowed(self):

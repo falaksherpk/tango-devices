@@ -417,6 +417,46 @@ def test_hung_plc_faults_and_init_stays_bounded(device_factory, hung_plc):
     assert poll_threads() == 1
 
 
+def test_recovers_after_a_hung_plc_returns(device, fake_hardware):
+    """A PLC that hangs (accepts, never answers) and then comes back: the
+    device must reconnect and return to ON by itself. Found live in Ch28:
+    after a timed-out read, pymodbus keeps its socket; when the peer later
+    closes it, every poll failed with EPIPE on the dead socket and the
+    device stayed FAULT until Init."""
+    port = fake_hardware["port"]
+    stop_proc(fake_hardware["proc"])
+    fake_hardware["proc"] = None
+
+    srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    srv.bind(("127.0.0.1", port))
+    srv.listen(8)
+    srv.settimeout(0.2)
+    held, stop = [], threading.Event()
+
+    def accept_loop():
+        while not stop.is_set():
+            with contextlib.suppress(OSError):  # the 0.2 s accept timeout
+                held.append(srv.accept()[0])
+
+    t = threading.Thread(target=accept_loop, daemon=True)
+    t.start()
+    try:
+        wait_for_state(device, DevState.FAULT)
+        time.sleep(1.5)  # at least one more timed-out read on the hung link
+        assert held, "the device never connected to the hung PLC"
+    finally:
+        stop.set()
+        t.join(timeout=2)
+        for conn in held:
+            conn.close()
+        srv.close()
+
+    fake_hardware["proc"] = start_simulator(port)
+    wait_for_state(device, DevState.ON, timeout=10)
+    assert device.BeamPermit is True
+
+
 def test_init_during_outage_then_recovers(device, fake_hardware):
     """Init while the PLC is down leaves a device that still recovers by
     itself."""

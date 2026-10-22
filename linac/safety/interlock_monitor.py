@@ -98,6 +98,7 @@ class InterlockMonitor(Device):
             self._cache = self._read_coils()
             self._apply_state_from_cache()
         except (ModbusException, OSError, AttributeError) as e:
+            self._drop_connection()
             self._fault(
                 f"Failed to connect to interlock PLC at {self.Host}:{self.Port}: {e}"
             )
@@ -113,6 +114,16 @@ class InterlockMonitor(Device):
         self.error_stream(msg)
         self.set_state(DevState.FAULT)
         self.set_status(msg)
+
+    def _drop_connection(self):
+        # After any failed call the connection can't be trusted: a timed-out
+        # read may still get its late reply, and pymodbus 3.15 keeps the
+        # socket after a timeout and after a plain OSError. Found live in
+        # Ch28: a PLC hung, then its peer closed, and every poll failed with
+        # EPIPE on that dead socket until Init. Closing here makes the next
+        # call connect afresh.
+        with self._client_lock:
+            self._client.close()
 
     def _read_coils(self):
         with self._client_lock:
@@ -151,6 +162,7 @@ class InterlockMonitor(Device):
             except (ModbusException, OSError, AttributeError) as e:
                 if self._stop_event.is_set():
                     return
+                self._drop_connection()
                 self._poll_failures += 1
                 self.error_stream(
                     f"Poll failed ({self._poll_failures} consecutive): {e}"
@@ -234,6 +246,7 @@ class InterlockMonitor(Device):
                     address=ADDR_RESET, value=True, device_id=PLC_DEVICE_ID
                 )
         except (ModbusException, OSError) as e:
+            self._drop_connection()
             tango.Except.throw_exception(
                 "InterlockMonitor_ResetNotDelivered",
                 f"Reset not delivered to the interlock PLC at "
