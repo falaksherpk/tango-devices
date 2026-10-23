@@ -196,11 +196,14 @@ class VacuumGauge(Device):
 
             # A good read clears the failure streak and, if the device
             # was faulted (at startup or later), brings it back to ON.
+            # Recovery is good news: INFO, not ERROR (as the interlock, Ch28).
             if self._poll_failures or self.get_state() != DevState.ON:
-                self.error_stream(
-                    f"Modbus contact restored after {self._poll_failures} "
-                    f"failed polls"
+                after = (
+                    f"{self._poll_failures} failed polls"
+                    if self._poll_failures
+                    else "a failed first read"
                 )
+                self.info_stream(f"Modbus contact restored after {after}")
                 self._poll_failures = 0
                 self.set_state(DevState.ON)
                 self.set_status(StatusNotSet)

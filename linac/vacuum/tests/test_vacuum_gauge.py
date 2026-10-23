@@ -472,3 +472,58 @@ def test_init_during_outage_then_recovers(device, fake_hardware):
     wait_for_state(device, DevState.ON)
     assert device.VacuumPressure > 0
     assert poll_threads() == 1
+
+
+# --- Recovery is logged at INFO, with what it recovered from (Ch29) ----
+
+
+def _recording_streams():
+    infos, errors = [], []
+
+    def record(store):
+        return lambda _self, msg, *_args: store.append(msg)
+
+    patches = contextlib.ExitStack()
+    patches.enter_context(
+        patch.object(vacuum_gauge.VacuumGauge, "info_stream", record(infos))
+    )
+    patches.enter_context(
+        patch.object(vacuum_gauge.VacuumGauge, "error_stream", record(errors))
+    )
+    return patches, infos, errors
+
+
+def test_recovery_is_logged_at_info_not_error(device, fake_hardware):
+    """Contact restored is good news: INFO. ERROR is for the failures
+    (live under systemd it was logged at ERROR, Ch29)."""
+    patches, infos, errors = _recording_streams()
+    with patches:
+        stop_proc(fake_hardware["proc"])
+        fake_hardware["proc"] = None
+        wait_for_state(device, DevState.FAULT)
+        fake_hardware["proc"] = start_simulator(fake_hardware["port"])
+        wait_for_state(device, DevState.ON)
+
+    assert any("Poll failed" in m for m in errors)
+    assert any("restored" in m for m in infos)
+    assert not any("restored" in m for m in errors)
+
+
+def test_startup_recovery_names_the_failed_first_read(device_factory):
+    """Started before its instrument: the recovery message says what failed
+    (the first read), not "after 0 failed polls" (Ch29)."""
+    port = get_free_port()
+    patches, infos, errors = _recording_streams()
+    with patches:
+        proxy = device_factory(Host="127.0.0.1", Port=port, ModbusDeviceId=1)
+        assert proxy.state() == DevState.FAULT
+        proc = start_simulator(port)
+        try:
+            wait_for_state(proxy, DevState.ON)
+        finally:
+            stop_proc(proc)
+
+    restored = [m for m in infos + errors if "restored" in m]
+    assert restored, f"no recovery message; infos={infos} errors={errors}"
+    assert all("after a failed first read" in m for m in restored), restored
+    assert not any("after 0 failed polls" in m for m in restored), restored
