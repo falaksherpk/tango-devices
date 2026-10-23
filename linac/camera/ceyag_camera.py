@@ -20,6 +20,14 @@ The blocking socket calls run in a worker thread (asyncio.to_thread).
 _disconnect() stops the read loop and wakes a recv() blocked in that
 thread (shutdown, then close) before Reconnect, Init or server shutdown
 go on, so no read loop outlives its connection or its device.
+
+The read loop always runs, also when the first connect fails, and heals
+the device by itself (Ch29): a lost or refused connection means FAULT,
+logged once, and a redial after a backoff that starts at 0.5 s and
+doubles up to 30 s. Only a received frame resets the backoff and brings
+the device back to ON - a camera that accepts a connection but sends no
+frames must not be redialled at full speed (the Faraday cup's lesson,
+Ch26). Reconnect and Init still work; they only restart the loop sooner.
 """
 
 import asyncio
@@ -35,6 +43,9 @@ from tango.server import Device, attribute, command, device_property, run
 WIDTH = 640
 HEIGHT = 480
 MAGIC = b"CEYG"
+BACKOFF_START_S = 0.5
+BACKOFF_CAP_S = 30.0
+STREAMING = "Connected, streaming frames."
 
 
 class CeYagCamera(Device):
@@ -70,25 +81,27 @@ class CeYagCamera(Device):
         await super().delete_device()
 
     async def _connect(self):
+        # The read loop starts either way: after a failed connect it keeps
+        # redialling, so a device started before its camera heals by itself.
         try:
             self._sock = await asyncio.to_thread(self._blocking_connect)
         except (TimeoutError, OSError) as e:
             msg = f"Failed to connect to camera at {self.host}:{self.port}: {e}"
+            self._fault(msg, force=True)
+        else:
+            self.set_state(DevState.ON)
+            self.set_status(STREAMING)
+        self._read_task = asyncio.create_task(self._read_loop())
+
+    def _fault(self, msg, *, force=False):
+        # Logged once per outage: a redial that fails again changes nothing. A
+        # deliberate connect (init, Reconnect) always reports its own result.
+        if force or self.get_state() != DevState.FAULT:
             self.error_stream(msg)
             self.set_status(msg)
             self.set_state(DevState.FAULT)
-            return
 
-        self.set_state(DevState.ON)
-        self.set_status("Connected, streaming frames.")
-        self._read_task = asyncio.create_task(self._read_loop())
-
-    async def _disconnect(self):
-        if self._read_task is not None:
-            self._read_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await self._read_task
-            self._read_task = None
+    def _close_socket(self):
         if self._sock is not None:
             # shutdown() wakes a recv() blocked in the worker thread; close()
             # alone does not.
@@ -96,6 +109,14 @@ class CeYagCamera(Device):
                 self._sock.shutdown(socket.SHUT_RDWR)
             self._sock.close()
             self._sock = None
+
+    async def _disconnect(self):
+        if self._read_task is not None:
+            self._read_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._read_task
+            self._read_task = None
+        self._close_socket()
 
     def _blocking_connect(self):
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -117,28 +138,43 @@ class CeYagCamera(Device):
 
     async def _read_loop(self):
         # Cancellation (Reconnect, Init, shutdown) ends the loop at an await.
-        try:
-            while True:
-                magic = await self._recv_exact(4)
-                if magic != MAGIC:
-                    raise ValueError(f"bad magic bytes: {magic!r}")
-                (length,) = struct.unpack(">I", await self._recv_exact(4))
-                payload = await self._recv_exact(length)
+        backoff = BACKOFF_START_S
+        while True:
+            if self._sock is None:
+                await asyncio.sleep(backoff)
+                backoff = min(backoff * 2, BACKOFF_CAP_S)
+                try:
+                    self._sock = await asyncio.to_thread(self._blocking_connect)
+                except (TimeoutError, OSError):
+                    continue
+            try:
+                frame = await self._read_frame()
+            except (ConnectionError, OSError, struct.error, ValueError) as e:
+                self._fault(f"Camera connection lost: {e}")
+                self._close_socket()
+                continue
 
-                self._frame = np.frombuffer(payload, dtype=np.uint8).reshape(
-                    HEIGHT, WIDTH
-                )
-                self._frame_count += 1
+            # A frame, not a connect, is the evidence that the link works.
+            backoff = BACKOFF_START_S
+            self._frame = frame
+            self._frame_count += 1
+            if self.get_state() != DevState.ON:
+                self.info_stream("Camera stream restored")
+                self.set_state(DevState.ON)
+                self.set_status(STREAMING)
 
-                now = time.monotonic()
-                if (now - self._last_push_time) * 1000 >= self.frame_interval_ms:
-                    self.push_change_event("image", self._frame)
-                    self._last_push_time = now
-        except (ConnectionError, OSError, struct.error, ValueError) as e:
-            msg = f"Camera connection lost: {e}"
-            self.error_stream(msg)
-            self.set_status(msg)
-            self.set_state(DevState.FAULT)
+            now = time.monotonic()
+            if (now - self._last_push_time) * 1000 >= self.frame_interval_ms:
+                self.push_change_event("image", self._frame)
+                self._last_push_time = now
+
+    async def _read_frame(self):
+        magic = await self._recv_exact(4)
+        if magic != MAGIC:
+            raise ValueError(f"bad magic bytes: {magic!r}")
+        (length,) = struct.unpack(">I", await self._recv_exact(4))
+        payload = await self._recv_exact(length)
+        return np.frombuffer(payload, dtype=np.uint8).reshape(HEIGHT, WIDTH)
 
     def is_Reconnect_allowed(self):
         return self.get_state() in (DevState.ON, DevState.FAULT)

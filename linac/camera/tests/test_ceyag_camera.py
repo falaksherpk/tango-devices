@@ -22,6 +22,7 @@ child, so the device never actually saw the simulated failure. Fixed
 using multiprocessing.Value, genuine shared memory that both the
 parent and the forked child can see updates to.
 """
+import contextlib
 import multiprocessing
 import struct
 import time
@@ -49,8 +50,16 @@ class FakeCameraHardware:
 
     def __init__(self):
         self.should_fail = multiprocessing.Value("b", 0)
+        # Ch29: a camera that isn't listening yet, and a count of connects,
+        # both shared with the forked server process for the same reason.
+        self.refuse_connect = multiprocessing.Value("b", 0)
+        self.connects = multiprocessing.Value("i", 0)
 
     def connect(self):
+        if self.refuse_connect.value:
+            raise ConnectionRefusedError("simulated: camera not listening")
+        with self.connects.get_lock():
+            self.connects.value += 1
         return _FakeConnection(self)
 
 
@@ -97,8 +106,8 @@ def hw():
     return FakeCameraHardware()
 
 
-@pytest.fixture
-def device(hw):
+@contextlib.contextmanager
+def running_camera(hw):
     # `self` is required and unused: these functions replace bound methods on
     # CeYagCamera via patch.object, so their signature must match the
     # original instance methods they stand in for.
@@ -123,6 +132,12 @@ def device(hw):
             process=True,  # required for GreenMode.Asyncio -- see module docstring
         ) as proxy,
     ):
+        yield proxy
+
+
+@pytest.fixture
+def device(hw):
+    with running_camera(hw) as proxy:
         yield proxy
 
 
@@ -234,3 +249,62 @@ def test_init_leaves_exactly_one_read_loop(device):
     assert after == pytest.approx(before, rel=0.4), (
         f"frame rate {before:.0f}/s before Init, {after:.0f}/s after"
     )
+
+
+def wait_for_state(proxy, state, seconds):
+    deadline = time.time() + seconds
+    while time.time() < deadline and proxy.state() != state:
+        time.sleep(0.05)
+    return proxy.state()
+
+
+def test_heals_when_the_camera_stream_returns(device, hw):
+    # The camera drops the stream, then serves again (a power cycle, or its
+    # simulator unit restarting): the device must return to ON by itself,
+    # with no Reconnect (Ch29). Before Ch29 it stayed FAULT.
+    hw.should_fail.value = 1
+    assert wait_for_state(device, DevState.FAULT, 3) == DevState.FAULT
+    time.sleep(1.0)
+    hw.should_fail.value = 0
+    assert wait_for_state(device, DevState.ON, 5) == DevState.ON
+    assert device.status() == "Connected, streaming frames."
+    count = device.frame_count
+    time.sleep(0.3)
+    assert device.frame_count > count
+
+
+def test_starts_in_fault_then_recovers_when_the_camera_appears(hw):
+    # Started before its camera: FAULT, then ON by itself once the camera
+    # listens. The read loop runs even when the first connect fails (Ch29).
+    hw.refuse_connect.value = 1
+    with running_camera(hw) as proxy:
+        assert proxy.state() == DevState.FAULT
+        assert "Failed to connect to camera" in proxy.status()
+        hw.refuse_connect.value = 0
+        assert wait_for_state(proxy, DevState.ON, 5) == DevState.ON
+
+
+def test_backs_off_against_a_camera_that_accepts_but_cannot_stream(device, hw):
+    # Every connect succeeds and every read fails. The device must keep
+    # redialling, but back off: a connect is no evidence the link works, so
+    # only a received frame resets the backoff (the Faraday cup's lesson, Ch26).
+    # With a 0.5 s start, doubling: about 3 connects in 4 s; resetting on each
+    # connect would be about 8.
+    hw.should_fail.value = 1
+    assert wait_for_state(device, DevState.FAULT, 3) == DevState.FAULT
+    start = hw.connects.value
+    time.sleep(4)
+    n = hw.connects.value - start
+    assert 2 <= n <= 5, f"{n} connects in 4 s"
+
+
+def test_reconnect_reports_its_own_failure(device, hw):
+    # Already FAULT from a lost stream, then a Reconnect that can't connect:
+    # the status must give the new reason, not keep the old one (Ch29).
+    hw.should_fail.value = 1
+    assert wait_for_state(device, DevState.FAULT, 3) == DevState.FAULT
+    assert "Camera connection lost" in device.status()
+    hw.refuse_connect.value = 1
+    device.Reconnect()
+    assert device.state() == DevState.FAULT
+    assert "Failed to connect to camera" in device.status()
