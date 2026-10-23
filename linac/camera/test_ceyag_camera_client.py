@@ -3,6 +3,7 @@
 Manual test client for fake_ceyag_camera.py -- proves the TCP framing
 protocol works in isolation before any Tango code touches it.
 """
+
 import socket
 import struct
 import sys

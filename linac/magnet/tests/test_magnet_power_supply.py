@@ -13,6 +13,7 @@ a tight loop while the device's own asyncio ramp task is concurrently
 running. Fixed by using process=True (a real subprocess), which is
 also closer to how a real device server actually runs in production.
 """
+
 import time
 from unittest.mock import MagicMock, patch
 
@@ -26,6 +27,7 @@ import magnet_power_supply
 
 class FakeHardware:
     """In-memory stand-in for the real RS-232 magnet PSU."""
+
     def __init__(self, initial=0.0):
         self.current = initial
 

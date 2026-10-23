@@ -7,6 +7,7 @@ instantiation, no Pool involved, against the real, already-running device.
 Read-only wrapper -- no StartOne/ramping exists on this controller, so no
 position-restoring teardown is needed (unlike the magnet).
 """
+
 from sardana import State
 
 from sardana_controllers.faraday_zerod_ctrl import FaradayZeroDController

@@ -32,6 +32,7 @@ Real issues found building this:
    backwards for a vacuum pump, which should only ever pull pressure
    further down from wherever it currently is.
 """
+
 import asyncio
 import sys
 import time
@@ -74,9 +75,12 @@ async def action(
         elif not pump_on:
             state["pump_started_at"] = None
         state["pump_on"] = pump_on
-        print(f"[fake-modbus-vacuum] pump write -> pump_on={pump_on} "
-              f"(starting from {state['pressure_at_pump_on']})" if pump_on else
-              f"[fake-modbus-vacuum] pump write -> pump_on={pump_on}")
+        print(
+            f"[fake-modbus-vacuum] pump write -> pump_on={pump_on} "
+            f"(starting from {state['pressure_at_pump_on']})"
+            if pump_on
+            else f"[fake-modbus-vacuum] pump write -> pump_on={pump_on}"
+        )
 
     # function_code 3 = read holding registers (pressure query)
     if function_code == 3 and address == 0:
@@ -87,13 +91,13 @@ async def action(
             current_registers[0] = simulated_pressure
             message = (
                 f"[fake-modbus-vacuum] pressure read -> "
-                f"{simulated_pressure/1000:.3f} mbar (pump on {elapsed:.1f}s, "
-                f"started from {start_pressure/1000:.3f} mbar)"
+                f"{simulated_pressure / 1000:.3f} mbar (pump on {elapsed:.1f}s, "
+                f"started from {start_pressure / 1000:.3f} mbar)"
             )
         else:
             message = (
                 f"[fake-modbus-vacuum] pressure read -> "
-                f"{current_registers[0]/1000:.3f} mbar (pump off)"
+                f"{current_registers[0] / 1000:.3f} mbar (pump off)"
             )
         if current_registers[0] != state["last_logged_pressure"]:
             print(message)

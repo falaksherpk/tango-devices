@@ -9,6 +9,7 @@ Tango device server (magnet_power_supply.py), not here -- keeping the
 simulator and the "real" ramp logic cleanly separated, the same
 transport/logic split already used in every Phase 2 protocol lab.
 """
+
 import serial
 import sys
 

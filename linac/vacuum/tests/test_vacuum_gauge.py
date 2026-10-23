@@ -23,6 +23,7 @@ down cleanly, Init closes the old Modbus connection and leaves exactly
 one poll loop, and a device started or Init-ed while the instrument is
 down recovers by itself once it comes back.
 """
+
 import contextlib
 import socket
 import subprocess
@@ -263,9 +264,7 @@ def test_invalid_properties_fault_at_startup(
 
 def test_unreachable_host_faults_at_startup(device_factory):
     """A valid-but-unreachable endpoint faults cleanly at startup."""
-    proxy = device_factory(
-        Host="127.0.0.1", Port=get_free_port(), ModbusDeviceId=1
-    )
+    proxy = device_factory(Host="127.0.0.1", Port=get_free_port(), ModbusDeviceId=1)
 
     assert proxy.state() == DevState.FAULT
     assert "Failed to connect" in proxy.status()
@@ -274,9 +273,7 @@ def test_unreachable_host_faults_at_startup(device_factory):
 def test_faulted_device_refuses_reads_and_commands(device_factory):
     """While faulted, the device must not serve a stale cached pressure
     or accept pump commands -- the core safety fix from LAB 5.6."""
-    proxy = device_factory(
-        Host="127.0.0.1", Port=get_free_port(), ModbusDeviceId=1
-    )
+    proxy = device_factory(Host="127.0.0.1", Port=get_free_port(), ModbusDeviceId=1)
     assert proxy.state() == DevState.FAULT
 
     for attr in ("VacuumPressure", "PumpStatus"):
@@ -401,9 +398,7 @@ def hung_instrument():
     srv.close()
 
 
-def test_hung_instrument_faults_and_init_stays_bounded(
-    device_factory, hung_instrument
-):
+def test_hung_instrument_faults_and_init_stays_bounded(device_factory, hung_instrument):
     """An instrument that accepts and never answers: the device faults,
     and Init returns well inside the 3 s client timeout and leaves exactly
     one poll loop (a poll blocked in a long read must not outlive its

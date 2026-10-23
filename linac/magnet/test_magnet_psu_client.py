@@ -3,6 +3,7 @@
 Manual test client for fake_magnet_psu.py -- proves the RS-232
 transport works in isolation before any Tango code touches it.
 """
+
 import serial
 import sys
 import time

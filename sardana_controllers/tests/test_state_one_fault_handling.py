@@ -20,6 +20,7 @@ recovery (not a fixed sleep) -- if it fails to come back within the
 timeout, this test fails loudly rather than leaving the device
 silently broken for whatever runs next.
 """
+
 import subprocess
 import sys
 import time
@@ -99,9 +100,7 @@ def killed_and_restarted_faraday_cup():
 def test_state_one_returns_fault_when_device_unreachable(
     killed_and_restarted_faraday_cup,  # noqa: ARG001
 ):
-    ctrl = FaradayZeroDController(
-        "test_inst", {"TangoDevice": DEVICE_NAME}
-    )
+    ctrl = FaradayZeroDController("test_inst", {"TangoDevice": DEVICE_NAME})
     ctrl.AddDevice(1)  # must not raise, even though the device is gone
 
     state, status = ctrl.StateOne(1)

@@ -11,6 +11,7 @@ proof against the real magnet on every Pool start -- confirmed via
 beamlinehost-20260909.log and beamlinehost-20260910.log, both showing
 unintended magnet moves.
 """
+
 import sys
 import time
 
@@ -48,9 +49,7 @@ def main():
 
     print()
     print("=== Faraday Cup ZeroDController ===")
-    fc = FaradayZeroDController(
-        "test_inst", {"TangoDevice": "linac/beam/faradaycup1"}
-    )
+    fc = FaradayZeroDController("test_inst", {"TangoDevice": "linac/beam/faradaycup1"})
     fc.AddDevice(1)
     state, status = fc.StateOne(1)
     reading = fc.ReadOne(1)

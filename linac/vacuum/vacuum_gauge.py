@@ -43,6 +43,7 @@ instrument up runs the restore again, which starts the pump if the
 stored value is true. Only writes of the attribute are memorized, not
 the PumpOn/PumpOff commands.
 """
+
 import threading
 
 from pymodbus.client import ModbusTcpClient
@@ -80,7 +81,6 @@ MAX_MODBUS_DEVICE_ID = 247
 
 
 class VacuumGauge(Device):
-
     Host = device_property(dtype=str, default_value="127.0.0.1")
     Port = device_property(dtype=int, default_value=5020)
     ModbusDeviceId = device_property(dtype=int, default_value=1)

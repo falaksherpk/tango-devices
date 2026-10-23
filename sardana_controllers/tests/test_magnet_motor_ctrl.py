@@ -7,6 +7,7 @@ direct instantiation, no Pool involved, against the real, already-running
 device. Teardown restores the magnet's original position since this drives
 real hardware state, not a mock.
 """
+
 import time
 
 import pytest

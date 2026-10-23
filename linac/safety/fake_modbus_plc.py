@@ -43,6 +43,7 @@ if the input recovers -- clearing it requires an explicit reset
 while all three inputs are currently safe. beam_permit is true only
 when inputs are safe AND no fault is latched.
 """
+
 import asyncio
 import sys
 from pymodbus.simulator import SimData, SimDevice, DataType

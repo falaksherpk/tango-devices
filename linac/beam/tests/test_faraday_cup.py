@@ -35,6 +35,7 @@ stops the poll loop. Without it, a server shut down while its loop was
 retrying a dead adapter aborted (Fatal Python error: Aborted) after the
 test had passed -- invisible to the test itself.
 """
+
 import socket
 import subprocess
 import sys
@@ -77,8 +78,13 @@ def wait_for_port(port: int, timeout: float = 3.0) -> None:
 
 def start_adapter(adapter_port: int, pico_port: int) -> subprocess.Popen:
     proc = subprocess.Popen(
-        [sys.executable, str(ADAPTER_SCRIPT),
-         str(adapter_port), "localhost", str(pico_port)]
+        [
+            sys.executable,
+            str(ADAPTER_SCRIPT),
+            str(adapter_port),
+            "localhost",
+            str(pico_port),
+        ]
     )
     wait_for_port(adapter_port)
     return proc
@@ -292,9 +298,7 @@ def test_init_leaves_exactly_one_poll_loop(device):
 
 
 def start_picoammeter(pico_port: int) -> subprocess.Popen:
-    proc = subprocess.Popen(
-        [sys.executable, str(PICOAMMETER_SCRIPT), str(pico_port)]
-    )
+    proc = subprocess.Popen([sys.executable, str(PICOAMMETER_SCRIPT), str(pico_port)])
     wait_for_port(pico_port)
     return proc
 

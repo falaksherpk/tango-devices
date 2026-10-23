@@ -29,6 +29,7 @@ Design notes:
   outlives its device. Without it, a server shut down while the loop was
   retrying a dead adapter aborted (Ch26).
 """
+
 import asyncio
 import contextlib
 import logging
@@ -126,7 +127,8 @@ class FaradayCup(Device):
             await self._close_link()
             self._reader, self._writer = await asyncio.wait_for(
                 asyncio.open_connection(self.PrologixHost, self.PrologixPort),
-                timeout=3.0)
+                timeout=3.0,
+            )
             # Lock already held for this whole method -- no nested
             # acquire here (asyncio.Lock is not reentrant).
             await self._send_line("++mode 1")
@@ -137,8 +139,12 @@ class FaradayCup(Device):
             # power-on state cannot be queried (see module docstring).
             await self._send_line("SYST:ZCH OFF")
             self._zero_check = False
-        log.info("connected to adapter at %s:%d, addr=%d",
-                  self.PrologixHost, self.PrologixPort, self.GpibAddress)
+        log.info(
+            "connected to adapter at %s:%d, addr=%d",
+            self.PrologixHost,
+            self.PrologixPort,
+            self.GpibAddress,
+        )
 
     async def _send_line(self, line: str):
         self._writer.write((line + "\n").encode("ascii"))
@@ -146,8 +152,7 @@ class FaradayCup(Device):
 
     async def _read_line(self, timeout_s: float = 1.0) -> str | None:
         try:
-            raw = await asyncio.wait_for(self._reader.readline(),
-                                          timeout=timeout_s)
+            raw = await asyncio.wait_for(self._reader.readline(), timeout=timeout_s)
         except TimeoutError:
             return None
         if not raw:
@@ -205,8 +210,7 @@ class FaradayCup(Device):
             await asyncio.sleep(backoff_s)
             backoff_s = min(backoff_s * 2, BACKOFF_CAP_S)
 
-    @attribute(dtype=float, label="Current", unit="A",
-               format="%.6E")
+    @attribute(dtype=float, label="Current", unit="A", format="%.6E")
     async def current(self):
         return await self._read_current()
 

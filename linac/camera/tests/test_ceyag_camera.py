@@ -22,6 +22,7 @@ child, so the device never actually saw the simulated failure. Fixed
 using multiprocessing.Value, genuine shared memory that both the
 parent and the forked child can see updates to.
 """
+
 import contextlib
 import multiprocessing
 import struct

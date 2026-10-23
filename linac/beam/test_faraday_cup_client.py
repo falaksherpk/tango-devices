@@ -8,6 +8,7 @@ manually verified live during Chapter 4 development via raw nc sessions.
 Usage:
     python3 test_faraday_cup_client.py [adapter_host] [adapter_port]
 """
+
 import socket
 import sys
 
@@ -17,8 +18,9 @@ PORT = int(sys.argv[2]) if len(sys.argv) > 2 else 1234
 FAILURES = []
 
 
-def send_recv(sock: socket.socket, lines: list[str],
-              read_timeout: float = 1.0) -> list[str]:
+def send_recv(
+    sock: socket.socket, lines: list[str], read_timeout: float = 1.0
+) -> list[str]:
     """Send each line, then collect whatever response lines arrive within
     read_timeout. Returns only the lines actually received (queries with
     no reply produce nothing, matching the real protocol)."""
@@ -98,48 +100,70 @@ def main() -> None:
         # (auto=0 is the real factory default -- confirmed against real
         # Prologix docs -- so *IDN? produces no immediate reply).
         resp = send_recv(sock, ["++ver"])
-        check("++ver returns version string",
-              len(resp) == 1 and "Prologix GPIB-ETHERNET" in resp[0],
-              detail=repr(resp))
+        check(
+            "++ver returns version string",
+            len(resp) == 1 and "Prologix GPIB-ETHERNET" in resp[0],
+            detail=repr(resp),
+        )
 
         resp = send_recv(sock, ["++addr 22", "*IDN?"])
-        check("*IDN? with auto=0 produces no immediate reply",
-              resp == [], detail=repr(resp))
+        check(
+            "*IDN? with auto=0 produces no immediate reply",
+            resp == [],
+            detail=repr(resp),
+        )
 
         resp = send_recv(sock, ["++read"])
-        check("++read fetches the pending *IDN? response",
-              len(resp) == 1 and "KEITHLEY" in resp[0], detail=repr(resp))
+        check(
+            "++read fetches the pending *IDN? response",
+            len(resp) == 1 and "KEITHLEY" in resp[0],
+            detail=repr(resp),
+        )
 
         # Scenario 2: zero-check state change is real, not just accepted
         resp = send_recv(sock, ["SYST:ZCH ON", "READ?", "++read"])
-        check("READ? after ZCH ON returns near-zero (zero-check noise floor)",
-              len(resp) == 1 and abs(float(resp[0].rstrip("A"))) < 1e-11,
-              detail=repr(resp))
+        check(
+            "READ? after ZCH ON returns near-zero (zero-check noise floor)",
+            len(resp) == 1 and abs(float(resp[0].rstrip("A"))) < 1e-11,
+            detail=repr(resp),
+        )
 
         resp = send_recv(sock, ["SYST:ZCH OFF", "READ?", "++read"])
-        check("READ? after ZCH OFF returns near baseline (~2.5e-9 A)",
-              len(resp) == 1 and abs(float(resp[0].rstrip("A")) - 2.5e-9) < 5e-10,
-              detail=repr(resp))
+        check(
+            "READ? after ZCH OFF returns near baseline (~2.5e-9 A)",
+            len(resp) == 1 and abs(float(resp[0].rstrip("A")) - 2.5e-9) < 5e-10,
+            detail=repr(resp),
+        )
 
         # Scenario 3: wrong address is silently dropped (no instrument
         # there), confirmed distinct from a real timeout.
         resp = send_recv(sock, ["++addr 5", "READ?"])
-        check("wrong address produces no reply (dropped, not forwarded)",
-              resp == [], detail=repr(resp))
+        check(
+            "wrong address produces no reply (dropped, not forwarded)",
+            resp == [],
+            detail=repr(resp),
+        )
 
         # Scenario 4: ++read with nothing pending times out silently
         # (proves the timeout path, not just the happy path).
-        resp = send_recv(sock, ["++addr 22", "++read_tmo_ms 200", "++read"],
-                          read_timeout=0.5)
-        check("++read with nothing pending times out with no reply",
-              resp == [], detail=repr(resp))
+        resp = send_recv(
+            sock, ["++addr 22", "++read_tmo_ms 200", "++read"], read_timeout=0.5
+        )
+        check(
+            "++read with nothing pending times out with no reply",
+            resp == [],
+            detail=repr(resp),
+        )
 
         # Scenario 5: ++auto 1 makes a write immediately produce a reply,
         # no explicit ++read needed -- the real behavioral difference
         # ++auto is supposed to make.
         resp = send_recv(sock, ["++auto 1", "READ?"])
-        check("++auto 1 makes READ? reply immediately, no ++read needed",
-              len(resp) == 1, detail=repr(resp))
+        check(
+            "++auto 1 makes READ? reply immediately, no ++read needed",
+            len(resp) == 1,
+            detail=repr(resp),
+        )
 
         # Restore auto=0 (real factory default) before disconnecting, so
         # this script leaves the shared fake hardware in its default

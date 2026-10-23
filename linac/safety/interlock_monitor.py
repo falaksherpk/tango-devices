@@ -31,6 +31,7 @@ synchronous first read, a poll thread that runs whenever the properties
 are valid, and a delete_device() that stops and joins it and closes the
 connection. The device has no memorized attributes.
 """
+
 import threading
 
 import tango
@@ -66,7 +67,6 @@ THREAD_JOIN_TIMEOUT_S = MODBUS_TIMEOUT_S * (MODBUS_RETRIES + 1) + POLL_INTERVAL_
 
 
 class InterlockMonitor(Device):
-
     Host = device_property(dtype=str, default_value="127.0.0.1")
     Port = device_property(dtype=int, default_value=5040)
 

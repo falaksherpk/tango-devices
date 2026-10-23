@@ -25,6 +25,7 @@ Usage:
     python3 fake_prologix_adapter.py <listen_port> <instrument_host> \\
         <instrument_port> [instrument_gpib_addr]
 """
+
 import asyncio
 import contextlib
 import logging
@@ -52,7 +53,7 @@ class AdapterState:
         self.addr = instrument_addr
         self.mode = 1  # controller mode (real factory default)
         self.auto = 0  # auto-read-after-write OFF (real factory default)
-        self.eos = 0   # CR+LF (real factory default)
+        self.eos = 0  # CR+LF (real factory default)
         self.read_tmo_ms = 500
 
 
@@ -73,14 +74,13 @@ class Backend:
         self.lock = asyncio.Lock()
 
     async def connect(self):
-        self.reader, self.writer = await asyncio.open_connection(
-            self.host, self.port)
-        log.info("connected to backend instrument at %s:%d",
-                  self.host, self.port)
+        self.reader, self.writer = await asyncio.open_connection(self.host, self.port)
+        log.info("connected to backend instrument at %s:%d", self.host, self.port)
 
     def _drop(self, why) -> None:
-        log.warning("backend instrument link lost (%s); redialling on the "
-                    "next command", why)
+        log.warning(
+            "backend instrument link lost (%s); redialling on the next command", why
+        )
         if self.writer is not None:
             self.writer.close()
         self.reader = self.writer = None
@@ -90,8 +90,9 @@ class Backend:
             try:
                 await self.connect()
             except OSError as e:
-                log.warning("backend instrument not reachable (%s) — "
-                            "dropping: %r", e, line)
+                log.warning(
+                    "backend instrument not reachable (%s) — dropping: %r", e, line
+                )
                 return False
         term = EOS_TERMINATORS[eos]
         try:
@@ -107,7 +108,8 @@ class Backend:
             return None
         try:
             raw = await asyncio.wait_for(
-                self.reader.readline(), timeout=timeout_ms / 1000)
+                self.reader.readline(), timeout=timeout_ms / 1000
+            )
         except TimeoutError:
             return None
         except OSError as e:
@@ -126,8 +128,9 @@ def parse_plus_plus(cmd: str) -> tuple[str, str | None]:
     return name, arg
 
 
-async def handle_plus_plus(cmd: str, state: AdapterState,
-                            backend: Backend) -> str | None:
+async def handle_plus_plus(
+    cmd: str, state: AdapterState, backend: Backend
+) -> str | None:
     name, arg = parse_plus_plus(cmd)
 
     if name == "ver":
@@ -161,8 +164,9 @@ async def handle_plus_plus(cmd: str, state: AdapterState,
         async with backend.lock:
             reply = await backend.read(state.read_tmo_ms)
         if reply is None:
-            log.warning("++read: no response from instrument within %dms",
-                        state.read_tmo_ms)
+            log.warning(
+                "++read: no response from instrument within %dms", state.read_tmo_ms
+            )
             return None
         return reply
 
@@ -170,13 +174,17 @@ async def handle_plus_plus(cmd: str, state: AdapterState,
     return None
 
 
-async def handle_gpib_passthrough(line: str, state: AdapterState,
-                                   backend: Backend,
-                                   instrument_addr: int) -> str | None:
+async def handle_gpib_passthrough(
+    line: str, state: AdapterState, backend: Backend, instrument_addr: int
+) -> str | None:
     if state.addr != instrument_addr:
-        log.warning("addressed device %d has no instrument behind it "
-                    "(only %d is wired up) — dropping: %r",
-                    state.addr, instrument_addr, line)
+        log.warning(
+            "addressed device %d has no instrument behind it "
+            "(only %d is wired up) — dropping: %r",
+            state.addr,
+            instrument_addr,
+            line,
+        )
         return None
 
     async with backend.lock:
@@ -187,10 +195,13 @@ async def handle_gpib_passthrough(line: str, state: AdapterState,
     return None
 
 
-async def client_loop(reader: asyncio.StreamReader,
-                       writer: asyncio.StreamWriter,
-                       state: AdapterState, backend: Backend,
-                       instrument_addr: int) -> None:
+async def client_loop(
+    reader: asyncio.StreamReader,
+    writer: asyncio.StreamWriter,
+    state: AdapterState,
+    backend: Backend,
+    instrument_addr: int,
+) -> None:
     peer = writer.get_extra_info("peername")
     log.info("client connected: %s", peer)
     try:
@@ -206,7 +217,8 @@ async def client_loop(reader: asyncio.StreamReader,
                 response = await handle_plus_plus(line, state, backend)
             else:
                 response = await handle_gpib_passthrough(
-                    line, state, backend, instrument_addr)
+                    line, state, backend, instrument_addr
+                )
 
             if response is not None:
                 writer.write((response + "\n").encode("ascii"))
@@ -218,8 +230,9 @@ async def client_loop(reader: asyncio.StreamReader,
         writer.close()
 
 
-async def main(listen_port: int, instrument_host: str, instrument_port: int,
-                instrument_addr: int) -> None:
+async def main(
+    listen_port: int, instrument_host: str, instrument_port: int, instrument_addr: int
+) -> None:
     state = AdapterState(instrument_addr)
     backend = Backend(instrument_host, instrument_port)
     await backend.connect()
@@ -230,22 +243,34 @@ async def main(listen_port: int, instrument_host: str, instrument_port: int,
     # Localhost only: simulator ports never leave tango-ds (handbook Part 3,
     # Ch26). asyncio's default listen backlog (100) is kept.
     server = await asyncio.start_server(handler, "127.0.0.1", listen_port)
-    log.info("fake Prologix adapter listening on port %d "
-              "(instrument addr %d at %s:%d)",
-              listen_port, instrument_addr, instrument_host, instrument_port)
+    log.info(
+        "fake Prologix adapter listening on port %d (instrument addr %d at %s:%d)",
+        listen_port,
+        instrument_addr,
+        instrument_host,
+        instrument_port,
+    )
     async with server:
         await server.serve_forever()
 
 
 if __name__ == "__main__":
     if len(sys.argv) < 4:
-        print(f"Usage: {sys.argv[0]} <listen_port> <instrument_host> "
-              f"<instrument_port> [instrument_gpib_addr]")
+        print(
+            f"Usage: {sys.argv[0]} <listen_port> <instrument_host> "
+            f"<instrument_port> [instrument_gpib_addr]"
+        )
         sys.exit(1)
     listen_port_arg = int(sys.argv[1])
     instrument_host_arg = sys.argv[2]
     instrument_port_arg = int(sys.argv[3])
     instrument_addr_arg = int(sys.argv[4]) if len(sys.argv) > 4 else 22
     with contextlib.suppress(KeyboardInterrupt):
-        asyncio.run(main(listen_port_arg, instrument_host_arg,
-                          instrument_port_arg, instrument_addr_arg))
+        asyncio.run(
+            main(
+                listen_port_arg,
+                instrument_host_arg,
+                instrument_port_arg,
+                instrument_addr_arg,
+            )
+        )

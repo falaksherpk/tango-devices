@@ -20,6 +20,7 @@ Init-ed while the PLC is down recovers by itself once it comes back, and
 a hung PLC can't block Init. Also: Reset reports a refused or
 undelivered write, and recovery is logged at INFO, not ERROR.
 """
+
 import contextlib
 import socket
 import subprocess
@@ -481,9 +482,7 @@ def test_recovery_is_logged_at_info_not_error(device, fake_hardware):
         return lambda _self, msg, *_args: store.append(msg)
 
     with (
-        patch.object(
-            interlock_monitor.InterlockMonitor, "info_stream", record(infos)
-        ),
+        patch.object(interlock_monitor.InterlockMonitor, "info_stream", record(infos)),
         patch.object(
             interlock_monitor.InterlockMonitor, "error_stream", record(errors)
         ),

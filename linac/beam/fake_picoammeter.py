@@ -13,6 +13,7 @@ Command set verified against real Keithley 6485 documentation:
 Usage:
     python3 fake_picoammeter.py <port> [baseline_current_amps]
 """
+
 import asyncio
 import contextlib
 import logging
@@ -81,9 +82,9 @@ async def handle_command(line: str, state: PicoammeterState) -> str | None:
     return None
 
 
-async def client_loop(reader: asyncio.StreamReader,
-                       writer: asyncio.StreamWriter,
-                       state: PicoammeterState) -> None:
+async def client_loop(
+    reader: asyncio.StreamReader, writer: asyncio.StreamWriter, state: PicoammeterState
+) -> None:
     peer = writer.get_extra_info("peername")
     log.info("client connected: %s", peer)
     try:
@@ -112,8 +113,11 @@ async def main(port: int, baseline_current: float) -> None:
     # Localhost only: simulator ports never leave tango-ds (handbook Part 3,
     # Ch26). asyncio's default listen backlog (100) is kept.
     server = await asyncio.start_server(handler, "127.0.0.1", port)
-    log.info("fake picoammeter listening on port %d (baseline=%.3e A)",
-              port, baseline_current)
+    log.info(
+        "fake picoammeter listening on port %d (baseline=%.3e A)",
+        port,
+        baseline_current,
+    )
     async with server:
         await server.serve_forever()
 

@@ -30,6 +30,7 @@ underlying reason, consistent with how a live device reporting its
 own FAULT state (e.g. backend instrument lost) already surfaces a
 real, informative status.
 """
+
 import tango
 from sardana import State
 from sardana.pool.controller import ZeroDController

@@ -19,6 +19,7 @@ Wire protocol (one frame):
     4 bytes  length      big-endian uint32, payload length in bytes
     N bytes  payload     raw grayscale pixels, row-major, 1 byte/pixel
 """
+
 import socket
 import struct
 import sys
