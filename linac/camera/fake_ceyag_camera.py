@@ -29,6 +29,9 @@ HOST = "127.0.0.1"
 WIDTH = 640
 HEIGHT = 480
 MAGIC = b"CEYG"
+# One progress line a minute, not one per frame: at 2-20 frames/s a line per
+# frame floods the journal once this runs as a service (handbook Part 3, Ch29).
+REPORT_EVERY_S = 60.0
 
 
 def make_frame(frame_number: int) -> bytes:
@@ -43,16 +46,28 @@ def make_frame(frame_number: int) -> bytes:
 def serve_one_client(conn: socket.socket, addr, frame_interval_s: float) -> None:
     print(f"[fake-ceyag-camera] client connected: {addr}")
     frame_number = 0
+    last_report = time.monotonic()
+    last_reported_frame = 0
     try:
         with conn:
             while True:
                 payload = make_frame(frame_number)
                 header = MAGIC + struct.pack(">I", len(payload))
                 conn.sendall(header + payload)
-                print(
-                    f"[fake-ceyag-camera] sent frame {frame_number} "
-                    f"({len(payload)} bytes)"
-                )
+                now = time.monotonic()
+                if frame_number == 0:
+                    print(
+                        f"[fake-ceyag-camera] sent frame 0 ({len(payload)} bytes); "
+                        f"progress every {REPORT_EVERY_S:.0f} s from now on"
+                    )
+                elif now - last_report >= REPORT_EVERY_S:
+                    print(
+                        f"[fake-ceyag-camera] sent frames up to {frame_number} "
+                        f"({frame_number - last_reported_frame} in the last "
+                        f"{now - last_report:.0f} s)"
+                    )
+                    last_report = now
+                    last_reported_frame = frame_number
                 frame_number += 1
                 time.sleep(frame_interval_s)
     except (BrokenPipeError, ConnectionResetError):

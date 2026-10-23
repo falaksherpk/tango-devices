@@ -45,8 +45,16 @@ PORT = int(sys.argv[1]) if len(sys.argv) > 1 else 5020  # standard Modbus TCP po
 pressure_data = SimData(0, count=1, values=1000, datatype=DataType.REGISTERS)
 pump_data = SimData(1, count=1, values=0, datatype=DataType.REGISTERS)
 
-# Shared mutable state the action callback closes over.
-state = {"pump_on": False, "pump_started_at": None, "pressure_at_pump_on": None}
+# Shared mutable state the action callback closes over. last_logged_pressure: a
+# read is printed only when the pressure differs from the last one printed - the
+# gauge polls once a second, and an unchanged reading per second floods the
+# journal once this runs as a service (handbook Part 3, Ch29).
+state = {
+    "pump_on": False,
+    "pump_started_at": None,
+    "pressure_at_pump_on": None,
+    "last_logged_pressure": None,
+}
 
 
 # start_address/count are required by pymodbus's own SimDevice(action=...)
@@ -77,16 +85,19 @@ async def action(
             start_pressure = state["pressure_at_pump_on"]
             simulated_pressure = max(10, int(start_pressure - elapsed * 50))
             current_registers[0] = simulated_pressure
-            print(
+            message = (
                 f"[fake-modbus-vacuum] pressure read -> "
                 f"{simulated_pressure/1000:.3f} mbar (pump on {elapsed:.1f}s, "
                 f"started from {start_pressure/1000:.3f} mbar)"
             )
         else:
-            print(
+            message = (
                 f"[fake-modbus-vacuum] pressure read -> "
                 f"{current_registers[0]/1000:.3f} mbar (pump off)"
             )
+        if current_registers[0] != state["last_logged_pressure"]:
+            print(message)
+            state["last_logged_pressure"] = current_registers[0]
 
     return None
 
