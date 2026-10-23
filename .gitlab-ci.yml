@@ -11,6 +11,9 @@ lint:
     # Every Python directory of the repo (the Sept 2026 practice code was
     # removed in handbook Part 3 Ch23). Settings are in ruff.toml.
     - ruff check linac/magnet/ linac/camera/ linac/beam/ linac/vacuum/ linac/safety/ sardana_controllers/
+    # Layout is enforced too, on the same paths (handbook Part 3 Ch29; the
+    # tree was formatted once before this check went in).
+    - ruff format --check linac/magnet/ linac/camera/ linac/beam/ linac/vacuum/ linac/safety/ sardana_controllers/
 
 test-runner:
   stage: test
@@ -24,15 +27,21 @@ test-runner:
     # The job also fails on any "Fatal Python error": the forked device
     # servers' crash traces never failed a test, so they used to pass
     # unnoticed (handbook Part 3, Ch26). pytest's status is kept in a file,
-    # because a pipe would report tee's.
+    # because a pipe would report tee's. The JUnit report feeds the
+    # pipeline's Tests tab (Ch29).
     - |
-      { python3 -m pytest linac/vacuum/tests/ linac/safety/tests/ linac/magnet/tests/ linac/camera/tests/ linac/beam/tests/ -v && rc=0 || rc=$?; echo "$rc" > pytest.rc; } 2>&1 | tee pytest.log
+      { python3 -m pytest linac/vacuum/tests/ linac/safety/tests/ linac/magnet/tests/ linac/camera/tests/ linac/beam/tests/ -v --junitxml=report.xml && rc=0 || rc=$?; echo "$rc" > pytest.rc; } 2>&1 | tee pytest.log
       rc=$(cat pytest.rc)
       if grep -n "Fatal Python error" pytest.log; then
         echo "test-runner: crash trace(s) in the log above (pytest exit $rc)"
         exit 1
       fi
       exit "$rc"
+  # Published even when the job fails, so the failing tests show in the UI.
+  artifacts:
+    when: always
+    reports:
+      junit: report.xml
 
 test-sardana:
   stage: test
