@@ -21,8 +21,17 @@ These tests instead exercise the pre-existing, permanent elements
 directly -- no controller/element creation or deletion -- eliminating
 the crash trigger entirely, at the cost of the originally-planned
 namespace isolation.
+
+Waiting for a macro (Ch31): RunMacro is asynchronous and returns before the Door is
+RUNNING, so a wait that polls the Door's state can read ON and return before the
+macro has even started (1 in 20 moves on the rebuilt fleet); the ascan test could
+then read the previous scan's Output. run_and_wait follows the Door's State and
+MacroStatus change events instead, and fails the test unless the macro finished.
 """
 
+import json
+import queue
+import re
 import time
 
 import pytest
@@ -30,15 +39,57 @@ import tango
 
 
 DOOR_NAME = "Door/linac/1"
+MACRO_ENDS = ("finish", "stop", "abort", "exception")
 
 
 def run_and_wait(door, args, timeout=15):
-    door.RunMacro(args)
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        if door.state() != tango.DevState.RUNNING:
-            break
-        time.sleep(0.2)
+    """Run one macro on the Door and wait for its own end; fail unless it finished.
+
+    The Door's State and MacroStatus change events arrive in order: the macro ended
+    when the Door leaves RUNNING, and finished if MacroStatus says "finish" for its
+    id. A macro rejected before it starts sends no MacroStatus and leaves the Door
+    in ALARM.
+    """
+    events = queue.Queue()
+    subscriptions = [
+        door.subscribe_event(name, tango.EventType.CHANGE_EVENT, events.put)
+        for name in ("State", "MacroStatus")
+    ]
+    try:
+        macro_id = re.search(r'id="([^"]+)"', door.RunMacro(args)[0]).group(1)
+        status, running, ended = None, False, None
+        deadline = time.monotonic() + timeout
+        while status is None:
+            if ended is not None:
+                # The Door has left RUNNING: give a late MacroStatus a moment.
+                deadline = min(deadline, ended + 1)
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            try:
+                event = events.get(timeout=remaining)
+            except queue.Empty:
+                break
+            if event.err:
+                continue
+            value = event.attr_value.value
+            if event.attr_name.rsplit("/", 1)[-1].lower() == "macrostatus":
+                for item in json.loads(value[1]) if value and value[1] else []:
+                    if item.get("id") == macro_id and item.get("state") in MACRO_ENDS:
+                        status = item["state"]
+            elif value == tango.DevState.RUNNING:
+                running = True
+            elif running and ended is None:
+                ended = time.monotonic()
+    finally:
+        for subscription in subscriptions:
+            door.unsubscribe_event(subscription)
+    if status == "finish":
+        return
+    if ended is None and status is None:
+        pytest.fail(f"macro {args} did not end within {timeout} s")
+    error = " ".join(door.read_attribute("Error").value or []).strip()
+    pytest.fail(f"macro {args} ended {status or door.state()}: {error}")
 
 
 @pytest.fixture
