@@ -11,6 +11,7 @@ real hardware state, not a mock.
 import time
 
 import pytest
+import tango
 from sardana import State
 
 from sardana_controllers.magnet_motor_ctrl import MagnetMotorController
@@ -39,6 +40,12 @@ def test_initial_state_is_on_or_moving(magnet_ctrl):
     state, status = magnet_ctrl.StateOne(1)
     assert state in (State.On, State.Moving)
     assert status
+
+
+def test_reads_the_device_not_its_polling_buffer(magnet_ctrl):
+    # Ch31: a read from the 1000 ms HDB++ polling buffer is up to a second
+    # old, which made scans record the previous point's position.
+    assert magnet_ctrl.proxy.get_source() == tango.DevSource.DEV
 
 
 def test_read_one_returns_float(magnet_ctrl):

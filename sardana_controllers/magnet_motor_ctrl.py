@@ -32,6 +32,13 @@ StateOne now catches tango.DevFailed and maps it to State.Fault with
 a status string that names the real underlying reason, consistent
 with how a live device reporting its own FAULT state (e.g. backend
 instrument lost) already surfaces a real, informative status.
+
+Ch31 finding: HDB++ (Ch30) polls the wrapped device's current and State
+every 1000 ms, and a DeviceProxy reads a polled attribute from that polling
+buffer by default (source CACHE_DEV), up to a second old. The first ascan on
+the rebuilt fleet recorded each point at the previous point's position, and
+test_start_one_ramps_to_target failed 3 of 3 runs. AddDevice now sets the
+proxy's source to DEV, so every read reaches the device itself.
 """
 
 import tango
@@ -67,6 +74,8 @@ class MagnetMotorController(MotorController):
     def AddDevice(self, _axis):
         if self.proxy is None:
             self.proxy = tango.DeviceProxy(self.TangoDevice)
+            # Read the device, not its polling buffer (see the module docstring).
+            self.proxy.set_source(tango.DevSource.DEV)
 
     def DeleteDevice(self, _axis):
         self.proxy = None

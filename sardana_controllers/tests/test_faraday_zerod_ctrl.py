@@ -8,6 +8,7 @@ Read-only wrapper -- no StartOne/ramping exists on this controller, so no
 position-restoring teardown is needed (unlike the magnet).
 """
 
+import tango
 from sardana import State
 
 from sardana_controllers.faraday_zerod_ctrl import FaradayZeroDController
@@ -26,6 +27,14 @@ def test_initial_state_is_on():
     state, status = ctrl.StateOne(1)
     assert state == State.On
     assert status
+    ctrl.DeleteDevice(1)
+
+
+def test_reads_the_device_not_its_polling_buffer():
+    # Ch31: a 0D channel averages its reads over the integration time; from the
+    # 1000 ms HDB++ polling buffer they would all be the same stale value.
+    ctrl = make_ctrl()
+    assert ctrl.proxy.get_source() == tango.DevSource.DEV
     ctrl.DeleteDevice(1)
 
 
