@@ -11,6 +11,9 @@ Talks to the RS-232 magnet PSU (here fake_magnet_psu.py on the other end of
 a socat pty pair) with SCPI-style commands: CURR? and CURR <value>. The
 blocking serial calls run in a worker thread (asyncio.to_thread), so the
 event loop keeps serving clients while the port is busy.
+
+Limits live here, on the device, so every client is bounded (Ch32): setpoint
+accepts 0-100 A; current warns above 90 A and alarms outside -1..100 A.
 """
 
 import asyncio
@@ -111,6 +114,9 @@ class MagnetPowerSupply(Device):
         dtype=float,
         label="Setpoint",
         unit="A",
+        description="Target output current; the supply ramps to it at ramp_rate A/s.",
+        min_value=0.0,
+        max_value=100.0,
         memorized=True,
         hw_memorized=True,
     )
@@ -128,8 +134,10 @@ class MagnetPowerSupply(Device):
         dtype=float,
         label="Current",
         unit="A",
+        description="Output current read back from the supply; follows the ramp.",
         min_value=-1.0,
         max_value=100.0,
+        max_warning=90.0,
         min_alarm=-1.0,
         max_alarm=100.0,
     )

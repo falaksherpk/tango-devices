@@ -19,7 +19,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 import serial
-from tango import DevFailed, DevState
+from tango import AttrQuality, DevFailed, DevState
 from tango.test_context import DeviceTestContext
 
 import magnet_power_supply
@@ -156,6 +156,46 @@ def test_current_value_range_is_set(device):
     config = device.get_attribute_config("current")
     assert float(config.min_value) == -1.0
     assert float(config.max_value) == 100.0
+
+
+def test_setpoint_limits_are_set(device):
+    # Ch32: the limits are on the device, so every client is bounded, not
+    # only the Taurus GUI.
+    config = device.get_attribute_config("setpoint")
+    assert float(config.min_value) == 0.0
+    assert float(config.max_value) == 100.0
+
+
+@pytest.mark.parametrize("value", [-5.0, 150.0])
+def test_setpoint_outside_limits_is_rejected(device, value):
+    with pytest.raises(DevFailed) as excinfo:
+        device.setpoint = value
+    assert excinfo.value.args[0].reason == "API_WAttrOutsideLimit"
+    assert device.state() == DevState.ON
+    assert device.setpoint == pytest.approx(0.0)
+
+
+def test_current_warning_bound_is_set(device):
+    # Warning bounds exist only in the config's alarms struct (AttributeInfoEx),
+    # unlike min_alarm/max_alarm, which AttributeInfo also has at the top level.
+    alarms = device.get_attribute_config("current").alarms
+    assert float(alarms.max_warning) == 90.0
+    assert alarms.min_warning == "Not specified"
+
+
+def test_current_above_warning_bound_reads_as_warning(device):
+    device.setpoint = 95.0  # ~1.9 s ramp at the fixture's 50 A/s
+    deadline = time.time() + 4
+    while time.time() < deadline and device.state() != DevState.ON:
+        time.sleep(0.05)
+    reading = device.read_attribute("current")
+    assert reading.value == pytest.approx(95.0, abs=1e-3)
+    assert reading.quality == AttrQuality.ATTR_WARNING
+
+
+def test_attributes_are_described(device):
+    for name in ("setpoint", "current"):
+        assert device.get_attribute_config(name).description != "No description"
 
 
 def test_init_fault_on_serial_connection_failure(fault_device):

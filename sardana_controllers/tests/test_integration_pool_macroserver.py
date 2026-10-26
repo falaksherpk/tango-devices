@@ -127,12 +127,14 @@ def test_ct_via_measurement_group(door, restore_active_mntgrp):  # noqa: ARG001
 def test_ascan_records_real_increasing_timestamps(door, restore_magnet_position):
     mot = restore_magnet_position
     start = mot.position
+    # A 1 A scan around where the magnet sits, kept inside the device's
+    # setpoint limits (0-100 A since Ch32): a magnet left at 0 by a Reset
+    # would otherwise scan from -0.5 A, which the device refuses.
+    low = min(max(start - 0.5, 0.0), 99.0)
+    high = low + 1.0
 
     run_and_wait(door, ["senv", "ActiveMntGrp", "fc_mg"])
-    run_and_wait(
-        door,
-        ["ascan", "magnet_mot", str(start - 0.5), str(start + 0.5), "2", "0.3"],
-    )
+    run_and_wait(door, ["ascan", "magnet_mot", str(low), str(high), "2", "0.3"])
 
     output_lines = list(door.Output)
     data_lines = [
@@ -145,4 +147,4 @@ def test_ascan_records_real_increasing_timestamps(door, restore_magnet_position)
     assert all(t > 0 for t in timestamps)
 
     final_position = mot.position
-    assert abs(final_position - (start + 0.5)) < 0.01
+    assert abs(final_position - high) < 0.01
