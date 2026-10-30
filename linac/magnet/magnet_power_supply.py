@@ -14,13 +14,17 @@ event loop keeps serving clients while the port is busy.
 
 Limits live here, on the device, so every client is bounded (Ch32): setpoint
 accepts 0-100 A; current warns above 90 A and alarms outside -1..100 A.
+
+setpoint is memorized and restored after every (re)start. Reset memorizes its
+0 A target the same way a client write would, so a restart after a Reset
+stays at 0 A instead of ramping back to the last written setpoint (Ch32).
 """
 
 import asyncio
 import contextlib
 
 import serial
-from tango import AttReqType, DevState, GreenMode
+from tango import AttReqType, DevFailed, DevState, Except, GreenMode, Util
 from tango.constants import StatusNotSet
 from tango.server import Device, attribute, command, device_property, run
 
@@ -153,6 +157,32 @@ class MagnetPowerSupply(Device):
             self._ramp_task.cancel()
         self._setpoint = 0.0
         self._ramp_task = asyncio.create_task(self._ramp_loop(0.0))
+        self._memorize_setpoint(0.0)
+
+    def _memorize_setpoint(self, value):
+        """Make a setpoint the device set itself survive a restart.
+
+        Tango memorizes only what clients write: the attribute's write value,
+        and its "__value" property in the database, which hw_memorized replays
+        after init_device(). A Reset left both at the last client write, so the
+        next restart ramped the magnet back up to it (Ch32, 30 Oct). The ramp
+        has already started when this runs: if memorizing fails, the magnet
+        still goes to value, and the caller gets an error saying what a restart
+        would do.
+        """
+        self.get_device_attr().get_w_attr_by_name("setpoint").set_write_value(value)
+        try:
+            Util.instance().get_database().put_device_attribute_property(
+                self.get_name(), {"setpoint": {"__value": [str(value)]}}
+            )
+        except DevFailed as exc:
+            Except.re_throw_exception(
+                exc,
+                "MagnetPSU_SetpointNotMemorized",
+                f"Ramping to {value} A, but {value} A could not be memorized: "
+                "a restart would restore the last written setpoint.",
+                "MagnetPowerSupply._memorize_setpoint",
+            )
 
 
 if __name__ == "__main__":

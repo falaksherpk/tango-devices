@@ -230,26 +230,48 @@ def test_init_fault_on_invalid_ramp_rate():
             assert "ramp_rate must be positive" in proxy.status()
 
 
-def test_init_during_ramp_stops_the_old_ramp(device):
-    # Init runs delete_device() then init_device(); Tango then restores the
-    # hw_memorized setpoint (50 A here), which starts a new ramp. Reset is a
-    # command, so it leaves the memorized value at 50 but ramps towards 0. If
-    # Init left that Reset ramp running, the two ramps would pull current in
-    # opposite directions and the device would never settle at 50 A.
-    device.setpoint = 50.0  # 1 s ramp at the fixture's 50 A/s
-    time.sleep(0.3)
-    device.Reset()
-    time.sleep(0.1)
-    device.Init()
-    deadline = time.time() + 4
+def _wait_settled(device, target, timeout=4.0):
+    """Wait until the device is ON with its current at target (or time out)."""
+    deadline = time.time() + timeout
     while time.time() < deadline:
         if device.state() == DevState.ON and device.current == pytest.approx(
-            50.0, abs=1e-3
+            target, abs=1e-3
         ):
-            break
+            return
         time.sleep(0.02)
+
+
+def test_init_during_ramp_settles_at_the_memorized_setpoint(device):
+    # Init runs delete_device() then init_device(); Tango then restores the
+    # hw_memorized setpoint (50 A here), which starts a new ramp from wherever
+    # the current had got to. Until Ch32 this test also had Reset start a ramp
+    # towards 0 A that Init had to stop. Reset now memorizes 0 A itself, so the
+    # restored target and any leftover ramp agree, and that case can no longer
+    # be built through Init. delete_device() still cancels the ramp, so that a
+    # leftover task can't write to the closed serial port; that isn't tested.
+    device.setpoint = 50.0  # 1 s ramp at the fixture's 50 A/s
+    time.sleep(0.3)
+    device.Init()
+    _wait_settled(device, 50.0)
     assert device.state() == DevState.ON
     assert device.current == pytest.approx(50.0, abs=1e-3)
+
+
+def test_reset_is_memorized(device):
+    # Ch32 (30 Oct): Reset ramped to 0 A but left the memorized setpoint at the
+    # last value a client had written, so the next restart (Init here) ramped
+    # the magnet back up to it. Reset must memorize 0 A, as a client write
+    # would.
+    device.setpoint = 50.0
+    _wait_settled(device, 50.0)
+    device.Reset()
+    _wait_settled(device, 0.0)
+    assert device.read_attribute("setpoint").w_value == pytest.approx(0.0)
+    device.Init()
+    time.sleep(1.5)  # a 50 A ramp would be finished by now
+    assert device.state() == DevState.ON
+    assert device.setpoint == pytest.approx(0.0)
+    assert device.current == pytest.approx(0.0, abs=1e-3)
 
 
 def test_status_follows_state_after_recovery():
