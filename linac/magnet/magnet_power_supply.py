@@ -28,6 +28,13 @@ from tango import AttReqType, DevFailed, DevState, Except, GreenMode, Util
 from tango.constants import StatusNotSet
 from tango.server import Device, attribute, command, device_property, run
 
+# States in which the operator may act (write a setpoint, Reset). ALARM is one
+# of them: a client that reads State while current is past its warning or alarm
+# level gets ALARM, and Tango then keeps the device in ALARM. Refusing actions
+# there locked the operator out above 90 A: no lower setpoint, no Reset (Ch32,
+# 31 Oct). FAULT, no contact with the supply, stays refused.
+OPERATOR_STATES = (DevState.ON, DevState.MOVING, DevState.ALARM)
+
 
 class MagnetPowerSupply(Device):
     green_mode = GreenMode.Asyncio
@@ -111,7 +118,7 @@ class MagnetPowerSupply(Device):
 
     def is_setpoint_allowed(self, req_type):
         if req_type == AttReqType.WRITE_REQ:
-            return self.get_state() in (DevState.ON, DevState.MOVING)
+            return self.get_state() in OPERATOR_STATES
         return True
 
     @attribute(
@@ -149,7 +156,7 @@ class MagnetPowerSupply(Device):
         return self._current
 
     def is_Reset_allowed(self):
-        return self.get_state() in (DevState.ON, DevState.MOVING)
+        return self.get_state() in OPERATOR_STATES
 
     @command
     async def Reset(self):

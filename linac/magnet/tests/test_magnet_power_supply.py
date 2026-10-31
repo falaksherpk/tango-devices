@@ -257,6 +257,40 @@ def test_init_during_ramp_settles_at_the_memorized_setpoint(device):
     assert device.current == pytest.approx(50.0, abs=1e-3)
 
 
+def _wait_ramp_over(device, target, timeout=4.0):
+    """Wait until a ramp to target is over: current at target and State no
+    longer MOVING, whatever State it ends in (or time out)."""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if (
+            device.current == pytest.approx(target, abs=1e-3)
+            and device.state() != DevState.MOVING
+        ):
+            return
+        time.sleep(0.02)
+
+
+def test_operator_can_act_above_the_warning_level(device):
+    # Ch32 (31 Oct): past current's max_warning (90 A) a client's State read
+    # returns ALARM, and Tango keeps the device in ALARM. The setpoint write and
+    # Reset accepted only ON/MOVING, so the operator could neither lower the
+    # current nor Reset it: a lockout that came with the warning level itself
+    # (5b9b9c1). Both are now allowed in ALARM.
+    device.setpoint = 95.0  # ~1.9 s ramp at the fixture's 50 A/s
+    _wait_ramp_over(device, 95.0)
+    assert device.state() == DevState.ALARM
+    device.setpoint = 50.0
+    _wait_settled(device, 50.0)
+    assert device.current == pytest.approx(50.0, abs=1e-3)
+
+    device.setpoint = 95.0
+    _wait_ramp_over(device, 95.0)
+    assert device.state() == DevState.ALARM
+    device.Reset()
+    _wait_settled(device, 0.0)
+    assert device.current == pytest.approx(0.0, abs=1e-3)
+
+
 def test_reset_is_memorized(device):
     # Ch32 (30 Oct): Reset ramped to 0 A but left the memorized setpoint at the
     # last value a client had written, so the next restart (Init here) ramped

@@ -199,7 +199,11 @@ class VacuumGauge(Device):
             # A good read clears the failure streak and, if the device
             # was faulted (at startup or later), brings it back to ON.
             # Recovery is good news: INFO, not ERROR (as the interlock, Ch28).
-            if self._poll_failures or self.get_state() != DevState.ON:
+            # Recovery means from FAULT, not from any state but ON: a client's
+            # State read can leave the device in ALARM (an attribute past its
+            # level), and treating that as a lost link flipped the state back
+            # to ON every second with a false "contact restored" (Ch32, 31 Oct).
+            if self._poll_failures or self.get_state() == DevState.FAULT:
                 after = (
                     f"{self._poll_failures} failed polls"
                     if self._poll_failures
@@ -221,7 +225,11 @@ class VacuumGauge(Device):
                 self._last_pushed_pressure = pressure
 
     def _is_operational(self):
-        return self.get_state() == DevState.ON
+        # ALARM included, as in the interlock (Ch28): with VacuumPressure past an
+        # alarm level, Tango keeps the device in ALARM once a client reads State,
+        # and refusing there would refuse PumpOn, the action that clears it
+        # (Ch32, 31 Oct). FAULT, no contact with the gauge, stays refused.
+        return self.get_state() in (DevState.ON, DevState.ALARM)
 
     @attribute(dtype=float, label="Vacuum Pressure", unit="mbar")
     def VacuumPressure(self):

@@ -153,6 +153,30 @@ def test_pump_commands_are_memorized(device):
     assert device.PumpStatus is True
 
 
+def test_operator_can_act_while_pressure_alarms(device, capfd):
+    # Ch32 (31 Oct): with VacuumPressure past an alarm level, a client's State
+    # read returns ALARM and Tango keeps the device in ALARM. The device served
+    # its pressure and accepted PumpOn only in ON, so bad vacuum refused the
+    # action that fixes it, and the poll loop took ALARM for a lost link: back
+    # to ON every second, with a false "contact restored". The level is set at
+    # runtime here, as a site would set it in the Tango database.
+    cfg = device.get_attribute_config_ex("VacuumPressure")[0]
+    cfg.alarms.max_alarm = "0.5"
+    device.set_attribute_config(cfg)
+    time.sleep(1.5)
+    assert device.state() == DevState.ALARM
+    assert device.VacuumPressure == pytest.approx(1.0, abs=0.001)
+
+    device.PumpOn()  # 0.05 mbar/s in the simulator: below 0.5 after ~10 s
+    deadline = time.time() + 15
+    while time.time() < deadline and device.VacuumPressure >= 0.5:
+        time.sleep(0.5)
+    assert device.VacuumPressure < 0.5
+    assert device.state() == DevState.ON
+    captured = capfd.readouterr()
+    assert "contact restored" not in captured.out + captured.err
+
+
 def test_pressure_decays_from_actual_current_state(device):
     """Regression test for the single most important historical bug
     this device carries forward (Phase 2 Lab 2.3): pressure must decay
