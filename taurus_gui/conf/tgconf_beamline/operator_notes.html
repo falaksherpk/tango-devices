@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Beamline operator panel -- notes</title>
+<style>
+  body { font-family: sans-serif; background: #e6e6e6; color: #202020; margin: 1.5em; max-width: 50em; }
+  h1 { font-size: 1.3em; } h2 { font-size: 1.1em; margin-top: 1.4em; }
+  td, th { padding: 0.2em 0.8em 0.2em 0; text-align: left; vertical-align: top; }
+  code { background: #d4d4d4; padding: 0 0.2em; }
+</style>
+</head>
+<body>
+<h1>Beamline operator panel</h1>
+<p>Tab 1 shows the quadrupole magnet power supply <code>linac/magnet/q1</code>.
+Values and states use Taurus's colors: green is normal, yellow a warning,
+red an alarm, and the trend is gray.</p>
+
+<h2>Magnet</h2>
+<table>
+  <tr><th>Item</th><th>Meaning</th><th>Limits</th></tr>
+  <tr><td>State</td><td>ON: ready. MOVING: ramping to a new setpoint. FAULT: no contact with the supply.</td><td></td></tr>
+  <tr><td>Current</td><td>Output current read back from the supply.</td><td>warning above 90 A; alarm below -1 A or above 100 A</td></tr>
+  <tr><td>Setpoint</td><td>Target current. Type a value and press Apply; the supply ramps at 5 A/s.</td><td>0 to 100 A; the device refuses anything else</td></tr>
+</table>
+
+<h2>Reset</h2>
+<p>Ramps the magnet to 0 A from wherever it is, and makes 0 A its memorized
+setpoint, so it stays at 0 A after a restart of the device. It asks for
+confirmation first; Cancel is the default, so pressing Enter does nothing.</p>
+
+<h2>No contact</h2>
+<p>If the panel loses contact with the magnet, its values turn hatched with
+dashes, Status shows None, and the setpoint cannot be written. Everything
+returns by itself when the device is back. If the device does not answer when
+the panel starts, the panel names it and offers Retry.</p>
+
+<h2>Not on this screen</h2>
+<p>Ramp rate, polling, archiving and the Init command are expert settings.
+Use Jive for diagnostics.</p>
+</body>
+</html>
