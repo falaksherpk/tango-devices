@@ -134,6 +134,25 @@ def test_pump_on_off_via_attribute_and_commands(device):
     assert device.PumpStatus is True
 
 
+def test_pump_commands_are_memorized(device):
+    # Ch32 (31 Oct): PumpOn/PumpOff switched the pump but left the memorized
+    # PumpStatus at the last attribute write, so a restart (Init here)
+    # restored that: PumpStatus = True, PumpOff, Init, and the pump ran again.
+    # The commands now memorize their result, as a write does.
+    device.PumpStatus = True
+    device.command_inout("PumpOff")
+    assert not device.read_attribute("PumpStatus").w_value
+    device.Init()
+    wait_for_state(device, DevState.ON)
+    assert device.PumpStatus is False
+
+    device.command_inout("PumpOn")
+    assert device.read_attribute("PumpStatus").w_value
+    device.Init()
+    wait_for_state(device, DevState.ON)
+    assert device.PumpStatus is True
+
+
 def test_pressure_decays_from_actual_current_state(device):
     """Regression test for the single most important historical bug
     this device carries forward (Phase 2 Lab 2.3): pressure must decay

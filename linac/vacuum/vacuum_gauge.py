@@ -40,15 +40,17 @@ has failed during device startup sequence", and reads of PumpStatus
 return the refused write's error, while VacuumPressure is served. A
 write of PumpStatus clears it (False keeps the pump off); Init with the
 instrument up runs the restore again, which starts the pump if the
-stored value is true. Only writes of the attribute are memorized, not
-the PumpOn/PumpOff commands.
+stored value is true. PumpOn and PumpOff memorize their result as a
+write of the attribute does, so a restart restores the last command,
+however it was given. Until Ch32 they didn't: PumpStatus = True, then
+PumpOff, then a restart, and the pump ran again.
 """
 
 import threading
 
 from pymodbus.client import ModbusTcpClient
 from pymodbus.exceptions import ModbusException
-from tango import AttrWriteType, DevState
+from tango import AttrWriteType, DevFailed, DevState, Except, Util
 from tango.constants import StatusNotSet
 from tango.server import Device, attribute, command, device_property, run
 
@@ -254,6 +256,7 @@ class VacuumGauge(Device):
     @command(dtype_out=str)
     def PumpOn(self):
         self._call(self._client.write_register, address=1, value=1)
+        self._memorize_pump_status(True)
         return "Pump turned ON"
 
     def is_PumpOn_allowed(self):
@@ -262,10 +265,35 @@ class VacuumGauge(Device):
     @command(dtype_out=str)
     def PumpOff(self):
         self._call(self._client.write_register, address=1, value=0)
+        self._memorize_pump_status(False)
         return "Pump turned OFF"
 
     def is_PumpOff_allowed(self):
         return self._is_operational()
+
+    def _memorize_pump_status(self, value):
+        """Make a pump command survive a restart, as a write of PumpStatus does.
+
+        Tango memorizes only attribute writes: the write value, and the
+        "__value" property in the database that hw_memorized restores after
+        init_device(). Called after the register write, so a failure here
+        leaves the pump as commanded and tells the caller what a restart
+        would do (Ch32, 31 Oct; the same fix as the magnet's Reset).
+        """
+        self.get_device_attr().get_w_attr_by_name("PumpStatus").set_write_value(value)
+        try:
+            Util.instance().get_database().put_device_attribute_property(
+                self.get_name(), {"PumpStatus": {"__value": [str(value).lower()]}}
+            )
+        except DevFailed as exc:
+            state = "ON" if value else "OFF"
+            Except.re_throw_exception(
+                exc,
+                "VacuumGauge_PumpStatusNotMemorized",
+                f"Pump turned {state}, but that could not be memorized: a restart "
+                "would restore the last written PumpStatus.",
+                "VacuumGauge._memorize_pump_status",
+            )
 
     def delete_device(self):
         # Init and server shutdown call this: stop the poll thread first,
