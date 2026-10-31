@@ -41,9 +41,10 @@ SYNOPTIC = None
 INSTRUMENTS_FROM_POOL = False
 
 # One spec per tab, in tab order. form: attributes, in rows; read_only: form rows
-# shown without a write widget; trend: (attribute, legend label) pairs, measured
-# value first; actions: command buttons, confirm is the danger message (None: no
-# confirmation).
+# shown without a write widget; tango_format: form rows shown in their Tango format
+# (set in the Tango database by the tango_ds role); trend: (attribute, legend label)
+# pairs, measured value first; actions: command buttons, confirm is the danger
+# message (None: no confirmation).
 TABS = [
     {
         "title": "Magnet",
@@ -63,6 +64,7 @@ TABS = [
         "device": "linac/vacuum/gauge1",
         "form": ["State", "Status", "VacuumPressure", "PumpStatus"],
         "read_only": ["PumpStatus"],
+        "tango_format": ["VacuumPressure"],
         "trend": {"curves": [("VacuumPressure", "pressure (mbar)")], "log_y": True},
         "actions": [
             {"command": "PumpOn", "text": "Pump ON", "confirm": None},

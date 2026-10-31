@@ -14,6 +14,7 @@ import weakref
 import pyqtgraph as pg
 import tango
 import taurus
+from taurus.core.tango.util import tangoFormatter
 from taurus.core.taurusbasetypes import TaurusEventType
 from taurus.external.qt import Qt
 from taurus.qt.qtgui.button import TaurusCommandButton
@@ -105,6 +106,32 @@ class StatusLabel(DefaultReadWidgetLabel):
         self.setBgRole("none")
 
 
+class TangoFormatLabel(DefaultReadWidgetLabel):
+    """A form row's read widget that shows the value in its Tango format.
+
+    Taurus's default formatter takes only the precision from the Tango format and
+    always shows fixed-point: a pressure with format "%.2e" (tango_ds role) still
+    read 0.01, and a real gauge's 1e-11 mbar would read 0.00 (Ch32, 31 Oct).
+    tangoFormatter uses the format as it is. Not for every row: an attribute
+    without a format (a boolean) would give it an invalid one.
+
+    A label works out its format string once, from the type of the first value it
+    shows. DefaultReadWidgetLabel.setModel() switches to the value's magnitude
+    only after the model is set, so the first value of an attribute that other
+    widgets already read can arrive as a Quantity: "{:~.2e}", which then fails on
+    every float and falls back to "{0}", 0.01 (Ch32, 31 Oct). The format is
+    worked out again once the label shows magnitudes.
+    """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.setFormat(tangoFormatter)
+
+    def setModel(self, model, **kwargs):
+        super().setModel(model, **kwargs)
+        self.resetFormat()
+
+
 class OperatorForm(TaurusForm):
     """A TaurusForm for the operator screen.
 
@@ -147,6 +174,14 @@ class OperatorForm(TaurusForm):
             self.warning("no row for %s; it keeps Taurus's label", model)
             return
         item.setReadWidgetClass(StatusLabel)
+
+    def setTangoFormat(self, model):
+        """Show model's value in its Tango format (TangoFormatLabel)."""
+        item = self.getItemByModel(model)
+        if item is None:
+            self.warning("no row for %s; it keeps Taurus's format", model)
+            return
+        item.setReadWidgetClass(TangoFormatLabel)
 
 
 class OperatorTrend(TaurusTrend):
@@ -294,6 +329,8 @@ class DeviceTab(Qt.QWidget):
         for attr in spec["form"]:
             if attr.lower() == "status":
                 self.form.setStatusRow(f"{device}/{attr}")
+        for attr in spec.get("tango_format", ()):
+            self.form.setTangoFormat(f"{device}/{attr}")
 
         self.buttons = []
         actions = Qt.QHBoxLayout()
