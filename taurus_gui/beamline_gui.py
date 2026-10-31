@@ -2,154 +2,58 @@
 """
 Beamline operator panel launcher (handbook Part 3, Ch32).
 
-Starts the TaurusGui configured in conf/tgconf_beamline, lays its panels out
-into the design brief's zones and shows the window maximized, at every start:
+Starts the TaurusGui configured in conf/tgconf_beamline, docks its two panels and
+shows the window maximized, at every start:
 
-    +----------------------+------------------------------------+
-    | Magnet               | Magnet Trend  (Manual: tab behind)  |
-    | (state, status,      |                                    |
-    |  current, setpoint)  |                                    |
-    +----------------------+                                    |
-    | Magnet Actions       |                                    |
-    +----------------------+------------------------------------+
+    +------------------------------------------------------------------+
+    | [Magnet] [Vacuum] ...  one tab per device (widgets.DeviceTabs)   |
+    |  +-----------------------+-------------------------------------+ |
+    |  | form                  | trend                               | |
+    |  | actions               |                                     | |
+    |  +-----------------------+-------------------------------------+ |
+    | [Devices] [Manual]                        status: device states  |
+    +------------------------------------------------------------------+
 
-The layout lives here, in code, rather than in an exported Taurus settings
-file: that file holds a pickled copy of the whole GUI configuration, with the
-Tango host baked into every model name (Ch32 T1). For the same reason the
-GUI runs on a throwaway settings file: Taurus's per-user settings would
-restore the last session's panel positions and even a trend's old time range
-(Ch32 U1). Every start gives the same screen.
+The layout lives here, in code, rather than in an exported Taurus settings file:
+that file holds a pickled copy of the whole GUI configuration, with the Tango host
+baked into every model name (Ch32 T1). For the same reason the GUI runs on a
+throwaway settings file: Taurus's per-user settings would restore the last
+session's panel positions and even a trend's old time range (Ch32 U1). Every start
+gives the same screen.
 
-The panels are docked into their zones before the window is shown, so its
-size limits are final when it is mapped. mutter (under Xwayland) drops the
-maximize request Qt makes before the window is mapped, and some made after,
-so StartupMaximizer asks again until the window really is maximized; only the
-zones' pixel sizes wait for that (Ch32, 30 Oct).
+The panels are docked before the window is shown, so its size limits are final when
+it is mapped. mutter (under Xwayland) drops the maximize request Qt makes before the
+window is mapped, and some made after, so StartupMaximizer asks again until the
+window really is maximized (Ch32, 30 Oct).
 
-Before the GUI is built, every Tango device its panels name must answer a
-ping. A device that is down when TaurusGui builds its panels leaves an empty
-form that never recovers, after a modal exception dialog that blocks the
-start (a Taurus 5.4.1 defect in TaurusValue.updateReadWidget, Ch32, 30 Oct).
-So the operator gets a dialog that names the missing devices, with Retry.
+Devices that do not answer no longer stop the start: each tab checks its own device
+and says so while it is down (Ch32, 31 Oct; until then one device down meant a
+dialog before anything showed).
 
 Usage, on beamlinehost (the operator's client, never tango-ds):
     beamline-gui-env python3 taurus_gui/beamline_gui.py [CONFDIR]
 """
 
-import importlib.util
-import inspect
 import sys
 import tempfile
 from pathlib import Path
 
-import tango
-import taurus
-from taurus.core.tango.tangovalidator import (
-    TangoAttributeNameValidator,
-    TangoDeviceNameValidator,
-)
 from taurus.external.qt import Qt
 from taurus.qt.qtgui.application import TaurusApplication
 from taurus.qt.qtgui.taurusgui import TaurusGui
-from taurus.qt.qtgui.taurusgui.utils import PanelDescription
 
 DEFAULT_CONF = Path(__file__).resolve().parent / "conf" / "tgconf_beamline"
 
-FORM, ACTIONS, TREND, NOTES = "Magnet", "Magnet Actions", "Magnet Trend", "Manual"
-# Pixel sizes on a 1920x1080 screen; Qt shares out the real window in proportion.
-LEFT_WIDTH, RIGHT_WIDTH = 640, 1280
-FORM_HEIGHT, ACTIONS_HEIGHT = 880, 70
-# How long the window manager gets to maximize the window after each request,
-# and how many times to ask again before the zones are sized anyway.
+DEVICES, NOTES = "Devices", "Manual"
+# How long the window manager gets to maximize the window after each request, and
+# how many times to ask again before giving up.
 MAXIMIZE_CHECK_MS = 500
 MAXIMIZE_RETRIES = 6
-# How long one device gets to answer the startup ping.
-PING_TIMEOUT_MS = 2000
-# Plain words for the Tango reasons a ping fails with; the code stays alongside
-# for whoever gets called.
-PING_REASONS = {
-    "API_CantConnectToDevice": "no connection",
-    "API_DeviceNotExported": "not running",
-    "API_DeviceNotDefined": "not in the Tango database",
-    "API_DeviceTimedOut": "no answer in time",
-}
-
-
-def load_config(conf):
-    """Import the configuration package by path, as TaurusGui does."""
-    init = conf / "__init__.py"
-    if not init.is_file():
-        raise SystemExit(f"beamline_gui: {conf} is not a configuration package")
-    spec = importlib.util.spec_from_file_location(conf.name, init)
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module  # its relative imports need the package
-    spec.loader.exec_module(module)
-    return module
-
-
-def required_devices(conf_module):
-    """The Tango devices behind the configuration's panels, sorted."""
-    attr_names, dev_names = TangoAttributeNameValidator(), TangoDeviceNameValidator()
-    devices = set()
-    for _, panel in inspect.getmembers(conf_module):
-        if not isinstance(panel, PanelDescription):
-            continue
-        models = panel.model
-        if isinstance(models, str) or models is None:
-            models = (models or "").split()
-        for model in models:
-            groups = attr_names.getUriGroups(model) or dev_names.getUriGroups(model)
-            if groups is None:
-                raise SystemExit(f"beamline_gui: {model!r} is not a Tango name")
-            devices.add(groups["devname"])
-    return sorted(devices)
-
-
-def unreachable(devices):
-    """(device, reason) for every device that doesn't answer a ping."""
-    down = []
-    for name in devices:
-        try:
-            proxy = tango.DeviceProxy(name)
-            proxy.set_timeout_millis(PING_TIMEOUT_MS)
-            proxy.ping()
-        except tango.DevFailed as exc:
-            down.append((name, exc.args[0].reason))
-    return down
-
-
-def wait_for_devices(devices, title):
-    """Return once every device answers; exit if the operator closes instead."""
-    while down := unreachable(devices):
-        for name, reason in down:
-            taurus.warning("startup check: %s does not answer (%s)", name, reason)
-        lines = "\n".join(
-            f"    {name}: {PING_REASONS.get(reason, 'no answer')} ({reason})"
-            for name, reason in down
-        )
-        if len(down) == 1:
-            head, tail = "this device doesn't", "Its device server is"
-            action = "Start it"
-        else:
-            head, tail = "these devices don't", "Their device servers are"
-            action = "Start them"
-        box = Qt.QMessageBox(
-            Qt.QMessageBox.Warning,
-            title,
-            f"The operator panel can't start: {head} answer.\n\n{lines}\n\n"
-            f"{tail} probably not running. {action}, then press Retry.",
-            Qt.QMessageBox.Retry | Qt.QMessageBox.Close,
-        )
-        box.setDefaultButton(Qt.QMessageBox.Retry)
-        if box.exec_() != Qt.QMessageBox.Retry:
-            taurus.warning("startup check: closed by the operator")
-            raise SystemExit(1)
-    taurus.info("startup check: %s answer", ", ".join(devices))
 
 
 def panels(gui):
-    """The four panels of the brief, in the order FORM, ACTIONS, TREND, NOTES."""
-    names = (FORM, ACTIONS, TREND, NOTES)
+    """The two panels, in the order DEVICES, NOTES."""
+    names = (DEVICES, NOTES)
     missing = [name for name in names if gui.getPanel(name) is None]
     if missing:
         raise SystemExit(f"beamline_gui: no panel(s) {missing} in the configuration")
@@ -157,43 +61,34 @@ def panels(gui):
 
 
 def arrange(gui):
-    """Dock the panels into the brief's zones. Call before the window is shown."""
-    form, actions, trend, notes = panels(gui)
-    # TaurusGui starts its panels tabbed together, and Qt won't split tabbed
-    # docks (splitDockWidget would add a tab instead): undock them all first.
-    for panel in (form, actions, trend, notes):
+    """Dock the panels: the device tabs in front, the manual behind them. Call
+    before the window is shown."""
+    devices, notes = panels(gui)
+    # TaurusGui starts its panels tabbed together in its own order: undock both,
+    # then dock them again in ours.
+    for panel in (devices, notes):
         gui.removeDockWidget(panel)
-    gui.addDockWidget(Qt.Qt.TopDockWidgetArea, form)
-    gui.splitDockWidget(form, trend, Qt.Qt.Horizontal)
-    gui.splitDockWidget(form, actions, Qt.Qt.Vertical)
-    gui.tabifyDockWidget(trend, notes)
-    for panel in (form, actions, trend, notes):
+    gui.addDockWidget(Qt.Qt.TopDockWidgetArea, devices)
+    gui.tabifyDockWidget(devices, notes)
+    for panel in (devices, notes):
         panel.show()
-    trend.raise_()
+    devices.raise_()
     # The Taurus/organization logo bar takes width for no operator purpose.
     logo_bar = gui.findChild(Qt.QToolBar, "jorgsToolBar")
     if logo_bar is not None:
         logo_bar.hide()
 
 
-def size_zones(gui):
-    """Share the window's real size out between the zones."""
-    form, actions, trend, _ = panels(gui)
-    gui.resizeDocks([form, trend], [LEFT_WIDTH, RIGHT_WIDTH], Qt.Qt.Horizontal)
-    gui.resizeDocks([form, actions], [FORM_HEIGHT, ACTIONS_HEIGHT], Qt.Qt.Vertical)
-    gui.info("zones sized for a %dx%d window", gui.width(), gui.height())
-
-
 class StartupMaximizer(Qt.QObject):
-    """Gets the window maximized at start, then sizes the zones once.
+    """Gets the window maximized at start.
 
-    mutter drops the maximize request Qt makes before the window is mapped,
-    and some made just after it (Ch32, 30 Oct). Qt's window state can't tell:
-    after a dropped request it may still read "maximized". So only the outcome
-    counts, a resize of the visible window into the maximized state. Until it
-    comes, every MAXIMIZE_CHECK_MS the state is cleared and requested again, up
-    to MAXIMIZE_RETRIES times; then the zones are sized anyway, with a warning.
-    Then it stops watching, so the operator can still un-maximize the window.
+    mutter drops the maximize request Qt makes before the window is mapped, and
+    some made just after it (Ch32, 30 Oct). Qt's window state can't tell: after a
+    dropped request it may still read "maximized". So only the outcome counts, a
+    resize of the visible window into the maximized state. Until it comes, every
+    MAXIMIZE_CHECK_MS the state is cleared and requested again, up to
+    MAXIMIZE_RETRIES times. Then it stops watching, so the operator can still
+    un-maximize the window.
     """
 
     def __init__(self, gui):
@@ -214,7 +109,6 @@ class StartupMaximizer(Qt.QObject):
 
     def eventFilter(self, obj, event):
         if event.type() == Qt.QEvent.Resize and obj.isVisible() and obj.isMaximized():
-            # The filter runs before the window lays itself out at the new size.
             Qt.QTimer.singleShot(0, self._finish)
         return False
 
@@ -224,7 +118,7 @@ class StartupMaximizer(Qt.QObject):
             return
         if self._retries == MAXIMIZE_RETRIES:
             self._gui.warning(
-                "window not maximized after %d retries; sizing the zones anyway",
+                "window not maximized after %d retries; leaving it as it is",
                 MAXIMIZE_RETRIES,
             )
             self._finish()
@@ -244,7 +138,7 @@ class StartupMaximizer(Qt.QObject):
         self._done = True
         self._timer.stop()
         self._gui.removeEventFilter(self)
-        size_zones(self._gui)
+        self._gui.info("window at %dx%d", self._gui.width(), self._gui.height())
 
 
 def main(argv):
@@ -253,8 +147,6 @@ def main(argv):
     # declared before the QApplication exists.
     Qt.QCoreApplication.setAttribute(Qt.Qt.AA_ShareOpenGLContexts)
     app = TaurusApplication(cmd_line_parser=None, app_name="taurusgui")
-    conf_module = load_config(conf)
-    wait_for_devices(required_devices(conf_module), conf_module.GUI_NAME)
     with tempfile.TemporaryDirectory(prefix="beamline-gui-") as tmp:
         settings = str(Path(tmp) / "session.ini")
         gui = TaurusGui(None, confname=str(conf), settingsname=settings)

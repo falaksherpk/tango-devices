@@ -12,31 +12,51 @@
 </head>
 <body>
 <h1>Beamline operator panel</h1>
-<p>Tab 1 shows the quadrupole magnet power supply <code>linac/magnet/q1</code>.
-Values and states use Taurus's colors: green is normal, yellow a warning,
-red an alarm, and the trend is gray.</p>
+<p>One tab per device. Each tab shows the device's State and Status, its values,
+a trend, and buttons for its commands. The status bar at the bottom right shows
+every device's State, whichever tab is open: orange for ALARM, red for FAULT or
+NO CONTACT. The green light next to it is the panel's heartbeat: if it stops
+blinking, the panel is hung.</p>
+<p>Value colors: green is normal, orange is past a warning or alarm level.
+Hatched rows have no value: the device does not answer. The trend shows this session only; for history, and for anything before
+the device was last out of contact, use the archive.</p>
 
-<h2>Magnet</h2>
+<h2>Magnet -- <code>linac/magnet/q1</code></h2>
 <table>
   <tr><th>Item</th><th>Meaning</th><th>Limits</th></tr>
-  <tr><td>State</td><td>ON: ready. MOVING: ramping to a new setpoint. FAULT: no contact with the supply.</td><td></td></tr>
+  <tr><td>State</td><td>ON: ready. MOVING: ramping to a new setpoint. ALARM: the current is past a level in Limits; you can still act. FAULT: no contact with the supply.</td><td></td></tr>
   <tr><td>Current</td><td>Output current read back from the supply.</td><td>warning above 90 A; alarm below -1 A or above 100 A</td></tr>
-  <tr><td>Setpoint</td><td>Target current. Type a value and press Apply; the supply ramps at 5 A/s.</td><td>0 to 100 A; the device refuses anything else</td></tr>
+  <tr><td>Setpoint</td><td>Target current. Type a value and press Enter; the supply ramps at 5 A/s. A typed value not yet sent shows in blue: it is sent only by Enter.</td><td>0 to 100 A; the device refuses anything else</td></tr>
 </table>
+<p><b>Reset magnet (ramp to 0 A)</b> ramps the magnet to 0 A from wherever it
+is, and makes 0 A its memorized setpoint, so it stays at 0 A after a restart of
+the device. It asks for confirmation first; Cancel is the default, so pressing
+Enter does nothing.</p>
 
-<h2>Reset</h2>
-<p>Ramps the magnet to 0 A from wherever it is, and makes 0 A its memorized
-setpoint, so it stays at 0 A after a restart of the device. It asks for
-confirmation first; Cancel is the default, so pressing Enter does nothing.</p>
+<h2>Vacuum -- <code>linac/vacuum/gauge1</code></h2>
+<table>
+  <tr><th>Item</th><th>Meaning</th><th>Limits</th></tr>
+  <tr><td>State</td><td>ON: pressure normal. ALARM: the pressure is past a level in Limits; you can still act. FAULT: no contact with the gauge; Status says why.</td><td></td></tr>
+  <tr><td>Vacuum Pressure</td><td>Pressure read from the gauge; the trend is logarithmic.</td><td>warning above 0.1 mbar; alarm above 0.5 mbar</td></tr>
+  <tr><td>Pump Status</td><td>Green: pump on. Read only; use the buttons.</td><td></td></tr>
+</table>
+<p><b>Pump ON</b> starts the pump, without confirmation. <b>Pump OFF</b> stops
+it after confirmation (Cancel is the default): the pressure then stops falling.
+The device remembers the last command and restores it when the device
+restarts. After the gauge itself restarts the pump can be off: check Pump
+Status and press Pump ON.</p>
 
-<h2>No contact</h2>
-<p>If the panel loses contact with the magnet, its values turn hatched with
-dashes, Status shows None, and the setpoint cannot be written. Everything
-returns by itself when the device is back. If the device does not answer when
-the panel starts, the panel names it and offers Retry.</p>
+<h2>A device out of contact</h2>
+<p>While a device does not answer, its rows are hatched, its State in the status
+bar reads NO CONTACT (or FAULT, with the reason in Status), and its buttons are
+disabled. Everything returns by itself when the device is back.</p>
+<p>If a device does not answer when the panel starts, its tab has a warning sign
+and names the device and the reason. The panel checks again every 5 s and builds
+the tab as soon as the device answers; <b>Retry now</b> checks at once. The other
+tabs work meanwhile.</p>
 
 <h2>Not on this screen</h2>
-<p>Ramp rate, polling, archiving and the Init command are expert settings.
-Use Jive for diagnostics.</p>
+<p>Ramp rate, alarm levels, polling, archiving and the Init command are expert
+settings. Use Jive for diagnostics.</p>
 </body>
 </html>
