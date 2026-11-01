@@ -19,7 +19,7 @@ from taurus.core.taurusbasetypes import TaurusEventType
 from taurus.external.qt import Qt
 from taurus.qt.qtgui.button import TaurusCommandButton
 from taurus.qt.qtgui.panel import TaurusForm
-from taurus.qt.qtgui.panel.taurusvalue import DefaultReadWidgetLabel
+from taurus.qt.qtgui.panel.taurusvalue import CenteredLed, DefaultReadWidgetLabel
 from taurus_pyqtgraph import TaurusTrend
 
 # ISA-101: a low-saturation gray base; the measured value is the strong line, a
@@ -46,7 +46,8 @@ PING_REASONS = {
     "API_DeviceNotDefined": "not in the Tango database",
     "API_DeviceTimedOut": "no answer in time",
 }
-# States in which a tab's actions are enabled. ALARM is one: the operator must be
+# Default states in which an action is enabled; an action's "states" in config.TABS
+# replaces them for that button. ALARM is one: the operator must be
 # able to act on what raised it (tango-devices 2c759c8). FAULT, MOVING aside, means
 # no contact with the instrument.
 ACTION_STATES = (tango.DevState.ON, tango.DevState.MOVING, tango.DevState.ALARM)
@@ -132,6 +133,15 @@ class TangoFormatLabel(DefaultReadWidgetLabel):
         self.resetFormat()
 
 
+class DeviationLed(CenteredLed):
+    """A boolean whose True is a deviation (ISA-101): orange when True, plain when
+    False, centered like Taurus's own boolean LED (CenteredLed), whose green reads
+    as "fine" (Faraday cup zero check, Ch32)."""
+
+    DefaultOnColor = "orange"
+    DefaultOffColor = "white"
+
+
 class OperatorForm(TaurusForm):
     """A TaurusForm for the operator screen.
 
@@ -182,6 +192,14 @@ class OperatorForm(TaurusForm):
             self.warning("no row for %s; it keeps Taurus's format", model)
             return
         item.setReadWidgetClass(TangoFormatLabel)
+
+    def setDeviationLed(self, model):
+        """Show model, a boolean, as a DeviationLed (True orange, False plain)."""
+        item = self.getItemByModel(model)
+        if item is None:
+            self.warning("no row for %s; it keeps Taurus's green LED", model)
+            return
+        item.setReadWidgetClass(DeviationLed)
 
 
 class OperatorTrend(TaurusTrend):
@@ -331,6 +349,8 @@ class DeviceTab(Qt.QWidget):
                 self.form.setStatusRow(f"{device}/{attr}")
         for attr in spec.get("tango_format", ()):
             self.form.setTangoFormat(f"{device}/{attr}")
+        for attr in spec.get("deviation_leds", ()):
+            self.form.setDeviationLed(f"{device}/{attr}")
 
         self.buttons = []
         actions = Qt.QHBoxLayout()
@@ -344,7 +364,8 @@ class DeviceTab(Qt.QWidget):
             # Disabled until the device's State says actions are allowed.
             button.setEnabled(False)
             actions.addWidget(button)
-            self.buttons.append(button)
+            states = action.get("states", [s.name for s in ACTION_STATES])
+            self.buttons.append((button, frozenset(states)))
 
         left = Qt.QWidget(self)
         column = Qt.QVBoxLayout(left)
@@ -369,9 +390,10 @@ class DeviceTab(Qt.QWidget):
         layout = Qt.QVBoxLayout(self)
         layout.addWidget(splitter)
 
-    def setActionsEnabled(self, enabled):
-        for button in self.buttons:
-            button.setEnabled(enabled)
+    def setActionsForState(self, state):
+        """Enable each action whose states include the device's state (a name)."""
+        for button, states in self.buttons:
+            button.setEnabled(state in states)
 
 
 class UnreachableTab(Qt.QWidget):
@@ -499,7 +521,7 @@ class DeviceTabs(Qt.QTabWidget):
     def _on_state(self, index, state):
         tab = self.widget(index)
         if isinstance(tab, DeviceTab):
-            tab.setActionsEnabled(state in {s.name for s in ACTION_STATES})
+            tab.setActionsForState(state)
         self._show_state(index, state)
 
     def _show_state(self, index, state):

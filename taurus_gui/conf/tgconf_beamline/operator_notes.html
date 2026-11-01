@@ -46,17 +46,33 @@ The device remembers the last command and restores it when the device
 restarts. After the gauge itself restarts the pump can be off: check Pump
 Status and press Pump ON.</p>
 
+<h2>Faraday cup -- <code>linac/beam/faradaycup1</code></h2>
+<table>
+  <tr><th>Item</th><th>Meaning</th><th>Limits</th></tr>
+  <tr><td>State</td><td>ON: reading the picoammeter. FAULT: no reading; Status says why, for example "No connection to adapter".</td><td></td></tr>
+  <tr><td>Current</td><td>Beam current on the cup, read from the picoammeter; the trend is linear. Green means the reading is valid, not that there is beam: a current near 0 A can mean no beam or Zero Check on.</td><td>no warning or alarm levels</td></tr>
+  <tr><td>Zero Check</td><td>Orange: zero check is on, and the reading is forced to about 0 A whatever the beam. Gray: off. Read only. In FAULT it shows the last setting, not the instrument.</td><td></td></tr>
+</table>
+<p><b>Reconnect to adapter</b> redials the device's link to the instrument
+adapter, without confirmation. It is the one button enabled in FAULT as well as
+in ON. It cannot repair the adapter's own link to the picoammeter. If it fails, a
+message says why ("Connect call failed": the adapter is not running); call the
+expert. Do not tick "Don't show this message again": it hides every later
+command error in this session. Once the adapter is back, the device also
+reconnects by itself within 30 s.</p>
+
 <h2>A device out of contact</h2>
 <p>While a device does not answer, its rows are hatched, its State in the status
 bar reads NO CONTACT (or FAULT, with the reason in Status), and its buttons are
-disabled. Everything returns by itself when the device is back.</p>
+disabled, except a Reconnect button, which is meant for this case. Everything
+returns by itself when the device is back.</p>
 <p>If a device does not answer when the panel starts, its tab has a warning sign
 and names the device and the reason. The panel checks again every 5 s and builds
 the tab as soon as the device answers; <b>Retry now</b> checks at once. The other
 tabs work meanwhile.</p>
 
 <h2>Not on this screen</h2>
-<p>Ramp rate, alarm levels, polling, archiving and the Init command are expert
-settings. Use Jive for diagnostics.</p>
+<p>Ramp rate, alarm levels, zero check, polling, archiving and the Init command
+are expert settings. Use Jive for diagnostics.</p>
 </body>
 </html>

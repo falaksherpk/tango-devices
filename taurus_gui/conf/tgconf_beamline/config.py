@@ -42,9 +42,12 @@ INSTRUMENTS_FROM_POOL = False
 
 # One spec per tab, in tab order. form: attributes, in rows; read_only: form rows
 # shown without a write widget; tango_format: form rows shown in their Tango format
-# (set in the Tango database by the tango_ds role); trend: (attribute, legend label)
-# pairs, measured value first; actions: command buttons, confirm is the danger
-# message (None: no confirmation).
+# (the device's, or the Tango database's when the tango_ds role sets one); trend:
+# (attribute, legend label) pairs, measured value first; actions: command buttons,
+# confirm is the danger message (None: no confirmation), states the State names in
+# which the button is enabled (default: widgets.ACTION_STATES).
+# deviation_leds: boolean rows whose True is a deviation, orange when True and plain
+# when False (widgets.DeviationLed).
 TABS = [
     {
         "title": "Magnet",
@@ -72,6 +75,23 @@ TABS = [
                 "command": "PumpOff",
                 "text": "Pump OFF",
                 "confirm": "The vacuum pump will stop; the pressure will stop falling.",
+            },
+        ],
+    },
+    {
+        "title": "Faraday cup",
+        "device": "linac/beam/faradaycup1",
+        "form": ["State", "Status", "current", "zero_check"],
+        "read_only": ["zero_check"],
+        "tango_format": ["current"],
+        "deviation_leds": ["zero_check"],
+        "trend": {"curves": [("current", "current (A)")]},
+        "actions": [
+            {
+                "command": "Reconnect",
+                "text": "Reconnect to adapter",
+                "confirm": None,
+                "states": ["ON", "FAULT"],
             },
         ],
     },
