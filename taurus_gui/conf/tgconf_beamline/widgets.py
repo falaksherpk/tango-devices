@@ -21,6 +21,7 @@ from taurus.qt.qtgui.button import TaurusCommandButton
 from taurus.qt.qtgui.panel import TaurusForm
 from taurus.qt.qtgui.panel.taurusvalue import CenteredLed, DefaultReadWidgetLabel
 from taurus_pyqtgraph import TaurusTrend
+from taurus_pyqtgraph.taurusimageitem import TaurusImageItem
 
 # ISA-101: a low-saturation gray base; the measured value is the strong line, a
 # target a thin dashed reference. Color stays reserved for deviations (Taurus's
@@ -283,6 +284,57 @@ class OperatorTrend(TaurusTrend):
             legend.setLabelTextColor(FOREGROUND)
 
 
+class OperatorImageItem(TaurusImageItem):
+    """A camera image for the operator (Ch32, Tab 5).
+
+    - Fixed levels 0-255 (an 8-bit camera), so brightness is intensity; Taurus's
+      setImage() call autoscales every frame, which makes a weak spot look bright.
+    - Row-major: a (rows, columns) frame shows columns wide and rows high.
+    - Cleared by OperatorImage when the device leaves ON: a camera in FAULT stops
+      pushing frames without any event, and the last frame would stay (Ch32).
+    """
+
+    LEVELS = (0, 255)
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, axisOrder="row-major", **kwargs)
+
+    def setImage(self, image=None, **kwargs):
+        if image is not None:
+            kwargs.setdefault("levels", self.LEVELS)
+            kwargs["autoLevels"] = False
+        super().setImage(image, **kwargs)
+
+
+class OperatorImage(pg.PlotWidget):
+    """The camera view: the image on the gray base, row 0 at the top, square
+    pixels, pixel axes to read the spot's position (Ch32, Tab 5)."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent=parent)
+        self.setBackground(BACKGROUND)
+        plot = self.getPlotItem()
+        plot.invertY(True)
+        plot.setAspectLocked(True)
+        for name in ("left", "bottom"):
+            axis = plot.getAxis(name)
+            axis.setPen(FOREGROUND)
+            axis.setTextPen(FOREGROUND)
+        plot.getAxis("bottom").setLabel("x (pixel)")
+        plot.getAxis("left").setLabel("y (pixel)")
+        self.image = OperatorImageItem()
+        plot.addItem(self.image)
+
+    def setModel(self, model):
+        """Show model, an image attribute."""
+        self.image.setModel(model)
+
+    def setDeviceState(self, state):
+        """Clear the picture unless the device (state, a name) is ON."""
+        if state != "ON":
+            self.image.clear()
+
+
 class OperatorCommandButton(TaurusCommandButton):
     """A TaurusCommandButton whose confirmation defaults to Cancel.
 
@@ -353,7 +405,7 @@ class DeviceWatch(Qt.QObject):
 
 
 class DeviceTab(Qt.QWidget):
-    """One device's tab: form and actions on the left, its trend on the right."""
+    """One device's tab: form and actions on the left, trend or image on the right."""
 
     def __init__(self, spec, parent=None):
         super().__init__(parent)
@@ -393,15 +445,19 @@ class DeviceTab(Qt.QWidget):
         column.addWidget(self.form, 1)
         column.addLayout(actions)
 
-        trend = spec["trend"]
-        self.trend = OperatorTrend(
-            curves=trend["curves"], log_y=trend.get("log_y", False), parent=self
-        )
-        self.trend.setModel([f"{device}/{attr}" for attr, _ in trend["curves"]])
+        if "image" in spec:
+            self.view = OperatorImage(self)
+            self.view.setModel(f"{device}/{spec['image']}")
+        else:
+            trend = spec["trend"]
+            self.view = OperatorTrend(
+                curves=trend["curves"], log_y=trend.get("log_y", False), parent=self
+            )
+            self.view.setModel([f"{device}/{attr}" for attr, _ in trend["curves"]])
 
         splitter = Qt.QSplitter(Qt.Qt.Horizontal, self)
         splitter.addWidget(left)
-        splitter.addWidget(self.trend)
+        splitter.addWidget(self.view)
         # Start at 1 : 2 whatever the form's size hint (stretch factors alone only
         # share out the space left over beyond it), and keep that on resizes.
         splitter.setSizes([1000, 2000])
@@ -414,6 +470,12 @@ class DeviceTab(Qt.QWidget):
         """Enable each action whose states include the device's state (a name)."""
         for button, states in self.buttons:
             button.setEnabled(state in states)
+
+    def setDeviceState(self, state):
+        """Follow the device's state (a name): actions, and a camera image."""
+        self.setActionsForState(state)
+        if isinstance(self.view, OperatorImage):
+            self.view.setDeviceState(state)
 
 
 class UnreachableTab(Qt.QWidget):
@@ -541,7 +603,7 @@ class DeviceTabs(Qt.QTabWidget):
     def _on_state(self, index, state):
         tab = self.widget(index)
         if isinstance(tab, DeviceTab):
-            tab.setActionsForState(state)
+            tab.setDeviceState(state)
         self._show_state(index, state)
 
     def _show_state(self, index, state):

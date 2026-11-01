@@ -49,6 +49,7 @@ INSTRUMENTS_FROM_POOL = False
 # deviation_leds: boolean rows whose True is a deviation, orange when True and plain
 # when False (widgets.DeviationLed).
 # ok_leds: boolean OK flags, plain when True and orange when False (widgets.OkLed).
+# image: an image attribute, shown instead of a trend (widgets.OperatorImage).
 TABS = [
     {
         "title": "Magnet",
@@ -119,6 +120,20 @@ TABS = [
                     "The interlock PLC will clear the latched fault if every input "
                     "is safe; the beam permit then returns."
                 ),
+            },
+        ],
+    },
+    {
+        "title": "Camera",
+        "device": "linac/camera/ceyag1",
+        "form": ["State", "Status", "frame_count"],
+        "image": "image",
+        "actions": [
+            {
+                "command": "Reconnect",
+                "text": "Reconnect to camera",
+                "confirm": None,
+                "states": ["ON", "FAULT"],
             },
         ],
     },

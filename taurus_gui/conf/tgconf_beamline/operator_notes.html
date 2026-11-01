@@ -78,6 +78,18 @@ input is still orange is accepted and does nothing: the lights stay orange.
 After a successful Reset, every light goes gray within a second, the State is
 ON, and the trend (the beam permit: 1 permitted, 0 not) returns to 1.</p>
 
+<h2>Camera -- <code>linac/camera/ceyag1</code></h2>
+<table>
+  <tr><th>Item</th><th>Meaning</th><th>Limits</th></tr>
+  <tr><td>State</td><td>ON: the camera streams pictures. FAULT: no stream; Status says why.</td><td></td></tr>
+  <tr><td>Frame Count</td><td>Pictures received since the device started; it rises about 5 per second while the camera streams. In FAULT it shows the last count.</td><td></td></tr>
+  <tr><td>Picture</td><td>The camera image, about 5 pictures a second. Brightness is the real intensity (a fixed scale, not adjusted per picture), so a weak spot looks weak. Row 0 is at the top; the axes give the position in pixels. No picture means no stream: it is cleared whenever the State is not ON.</td><td></td></tr>
+</table>
+<p><b>Reconnect to camera</b> redials the camera, without confirmation, in ON
+and in FAULT. It shows no message: watch Status. If the camera is still
+unreachable, Status names the reason ("Connection refused"); call the expert.
+Once the camera is back, the device also reconnects by itself.</p>
+
 <h2>A device out of contact</h2>
 <p>While a device does not answer, its rows are hatched, its State in the status
 bar reads NO CONTACT (or FAULT, with the reason in Status), and its buttons are
@@ -90,6 +102,7 @@ tabs work meanwhile.</p>
 
 <h2>Not on this screen</h2>
 <p>Ramp rate, alarm levels, zero check, polling, archiving and the Init command
-are expert settings. Use Jive for diagnostics.</p>
+are expert settings; image analysis (profiles, contrast) is an expert tool. Use
+Jive for diagnostics.</p>
 </body>
 </html>
