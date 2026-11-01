@@ -18,6 +18,8 @@ every device's State, whichever tab is open: orange for ALARM, red for FAULT or
 NO CONTACT. The green light next to it is the panel's heartbeat: if it stops
 blinking, the panel is hung.</p>
 <p>Value colors: green is normal, orange is past a warning or alarm level.
+Condition lights (Zero Check, the interlock lights) are gray when normal and
+orange when not.
 Hatched rows have no value: the device does not answer. The trend shows this session only; for history, and for anything before
 the device was last out of contact, use the archive.</p>
 
@@ -60,6 +62,21 @@ message says why ("Connect call failed": the adapter is not running); call the
 expert. Do not tick "Don't show this message again": it hides every later
 command error in this session. Once the adapter is back, the device also
 reconnects by itself within 30 s.</p>
+
+<h2>Interlock -- <code>linac/safety/interlock1</code></h2>
+<table>
+  <tr><th>Item</th><th>Meaning</th><th>Limits</th></tr>
+  <tr><td>State</td><td>ON: beam permitted. ALARM: the interlock has tripped; Status lists the inputs; you can still act. FAULT: no contact with the interlock PLC; Status says why.</td><td></td></tr>
+  <tr><td>Beam Permit</td><td>Gray: beam permitted. Orange: no beam permit.</td><td></td></tr>
+  <tr><td>Fault Latched</td><td>Orange: a trip is latched. It stays until Reset, even after its cause is gone. Gray: nothing latched.</td><td></td></tr>
+  <tr><td>Door Closed, Vacuum OK, Water Flow OK</td><td>The interlock's inputs. Gray: safe. Orange: this input is unsafe and has tripped the interlock.</td><td></td></tr>
+</table>
+<p><b>Reset interlock</b> asks the PLC to clear a latched trip, after
+confirmation (Cancel is the default). The PLC clears it only if every input is
+safe: first make the orange inputs gray, then press Reset. A Reset while an
+input is still orange is accepted and does nothing: the lights stay orange.
+After a successful Reset, every light goes gray within a second, the State is
+ON, and the trend (the beam permit: 1 permitted, 0 not) returns to 1.</p>
 
 <h2>A device out of contact</h2>
 <p>While a device does not answer, its rows are hatched, its State in the status

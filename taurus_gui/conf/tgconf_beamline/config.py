@@ -48,6 +48,7 @@ INSTRUMENTS_FROM_POOL = False
 # which the button is enabled (default: widgets.ACTION_STATES).
 # deviation_leds: boolean rows whose True is a deviation, orange when True and plain
 # when False (widgets.DeviationLed).
+# ok_leds: boolean OK flags, plain when True and orange when False (widgets.OkLed).
 TABS = [
     {
         "title": "Magnet",
@@ -92,6 +93,32 @@ TABS = [
                 "text": "Reconnect to adapter",
                 "confirm": None,
                 "states": ["ON", "FAULT"],
+            },
+        ],
+    },
+    {
+        "title": "Interlock",
+        "device": "linac/safety/interlock1",
+        "form": [
+            "State",
+            "Status",
+            "BeamPermit",
+            "FaultLatched",
+            "DoorClosed",
+            "VacuumOk",
+            "WaterFlowOk",
+        ],
+        "deviation_leds": ["FaultLatched"],
+        "ok_leds": ["BeamPermit", "DoorClosed", "VacuumOk", "WaterFlowOk"],
+        "trend": {"curves": [("BeamPermit", "beam permit")]},
+        "actions": [
+            {
+                "command": "Reset",
+                "text": "Reset interlock",
+                "confirm": (
+                    "The interlock PLC will clear the latched fault if every input "
+                    "is safe; the beam permit then returns."
+                ),
             },
         ],
     },

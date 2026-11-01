@@ -142,6 +142,16 @@ class DeviationLed(CenteredLed):
     DefaultOffColor = "white"
 
 
+class OkLed(CenteredLed):
+    """A boolean OK flag (door closed, vacuum OK...): plain when True, orange when
+    False, the deviation (ISA-101). Inverted: QLed lights the False state, in the
+    color the controller picks for False (offColor) (interlock, Ch32)."""
+
+    DefaultLedInverted = True
+    DefaultOnColor = "white"
+    DefaultOffColor = "orange"
+
+
 class OperatorForm(TaurusForm):
     """A TaurusForm for the operator screen.
 
@@ -200,6 +210,14 @@ class OperatorForm(TaurusForm):
             self.warning("no row for %s; it keeps Taurus's green LED", model)
             return
         item.setReadWidgetClass(DeviationLed)
+
+    def setOkLed(self, model):
+        """Show model, a boolean OK flag, as an OkLed (True plain, False orange)."""
+        item = self.getItemByModel(model)
+        if item is None:
+            self.warning("no row for %s; it keeps Taurus's green LED", model)
+            return
+        item.setReadWidgetClass(OkLed)
 
 
 class OperatorTrend(TaurusTrend):
@@ -351,6 +369,8 @@ class DeviceTab(Qt.QWidget):
             self.form.setTangoFormat(f"{device}/{attr}")
         for attr in spec.get("deviation_leds", ()):
             self.form.setDeviationLed(f"{device}/{attr}")
+        for attr in spec.get("ok_leds", ()):
+            self.form.setOkLed(f"{device}/{attr}")
 
         self.buttons = []
         actions = Qt.QHBoxLayout()
