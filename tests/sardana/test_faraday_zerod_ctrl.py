@@ -2,7 +2,7 @@
 LAB 7.8 -- controller-unit tests for the Sardana ZeroDController wrapping
 linac/beam/faradaycup1 (Ch4's Faraday cup / picoammeter).
 
-Formalizes the pattern proven in sardana_controllers/lab72_proof.py: direct
+Formalizes the pattern proven in tools/lab72_proof.py: direct
 instantiation, no Pool involved, against the real, already-running device.
 Read-only wrapper -- no StartOne/ramping exists on this controller, so no
 position-restoring teardown is needed (unlike the magnet).
@@ -11,7 +11,7 @@ position-restoring teardown is needed (unlike the magnet).
 import tango
 from sardana import State
 
-from sardana_controllers.faraday_zerod_ctrl import FaradayZeroDController
+from beamline_tango.sardana_controllers.faraday_zerod_ctrl import FaradayZeroDController
 
 
 def make_ctrl():

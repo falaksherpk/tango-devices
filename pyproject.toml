@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "beamline-tango-devices"
+version = "1.0.0"
+description = "Tango device servers, protocol simulators and Sardana controllers of the beamline lab"
+readme = "README.md"
+requires-python = ">=3.12"
+authors = [{ name = "Falak Sher" }]
+# License: MIT, in LICENSE (setuptools adds it to the wheel/sdist by default).
+# No `license` key on purpose: setuptools 68 (Ubuntu 24.04) rejects the SPDX
+# string form, and setuptools >= 77 deprecates the table form (as in
+# beamline-healthcheck, handbook Ch15).
+# Compatible ranges only; the exact, hash-locked versions the package ships
+# are in the lock file (handbook Part 4, Ch33).
+dependencies = [
+    "pytango>=10.3,<10.4",
+    "numpy>=2",
+    "pyserial>=3.5",
+    "pymodbus>=3.15,<3.16",
+]
+
+[project.optional-dependencies]
+# Loaded by Sardana's Pool from the sardana_controllers directory (PoolPath).
+sardana = ["sardana>=3.7,<3.8"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+# sardana_controllers has no __init__.py on purpose: the Pool imports every .py
+# file in its PoolPath directory, so it holds only controller modules.
+namespaces = true
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]

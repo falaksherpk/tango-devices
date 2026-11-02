@@ -4,8 +4,9 @@ no Sardana Pool involved. Confirms StartOne/StateOne/ReadOne genuinely
 work against the real, already-running Ch2/Ch4 devices before either
 controller is ever wired into a live Pool.
 
-Guarded behind __main__: this file lives under Pool_linac_1's PoolPath,
-so Sardana's controller-library scan imports it on every Pool startup.
+Guarded behind __main__: until tango-devices 1.0.0 this file lived under
+Pool_linac_1's PoolPath, so Sardana's controller-library scan imported it on
+every Pool startup (now in tools/, outside PoolPath; handbook Part 4, Ch33).
 Without the guard, importing it (not running it) was executing this
 proof against the real magnet on every Pool start -- confirmed via
 beamlinehost-20260909.log and beamlinehost-20260910.log, both showing
@@ -18,8 +19,8 @@ import time
 from sardana import State
 
 sys.path.insert(0, ".")
-from sardana_controllers.magnet_motor_ctrl import MagnetMotorController
-from sardana_controllers.faraday_zerod_ctrl import FaradayZeroDController
+from beamline_tango.sardana_controllers.magnet_motor_ctrl import MagnetMotorController
+from beamline_tango.sardana_controllers.faraday_zerod_ctrl import FaradayZeroDController
 
 
 def main():

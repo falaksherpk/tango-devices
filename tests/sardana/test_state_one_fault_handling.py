@@ -29,10 +29,10 @@ import pytest
 import tango
 
 from sardana import State
-from sardana_controllers.faraday_zerod_ctrl import FaradayZeroDController
+from beamline_tango.sardana_controllers.faraday_zerod_ctrl import FaradayZeroDController
 
 DEVICE_NAME = "linac/beam/faradaycup1"
-DEVICE_SCRIPT = "linac/beam/faraday_cup.py"
+DEVICE_SCRIPT = "src/beamline_tango/devices/faraday_cup.py"
 DEVICE_INSTANCE = "faradaycup1"
 
 

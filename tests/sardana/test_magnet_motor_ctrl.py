@@ -2,7 +2,7 @@
 LAB 7.8 -- controller-unit tests for the Sardana MotorController wrapping
 linac/magnet/q1 (Ch2's magnet power supply).
 
-Formalizes the pattern already proven in sardana_controllers/lab72_proof.py:
+Formalizes the pattern already proven in tools/lab72_proof.py:
 direct instantiation, no Pool involved, against the real, already-running
 device. Teardown restores the magnet's original position since this drives
 real hardware state, not a mock.
@@ -14,7 +14,7 @@ import pytest
 import tango
 from sardana import State
 
-from sardana_controllers.magnet_motor_ctrl import MagnetMotorController
+from beamline_tango.sardana_controllers.magnet_motor_ctrl import MagnetMotorController
 
 
 @pytest.fixture

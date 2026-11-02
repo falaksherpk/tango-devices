@@ -39,10 +39,11 @@ from tango import DevFailed, DevState
 from pymodbus.client import ModbusTcpClient
 from tango.test_context import DeviceTestContext
 
-import vacuum_gauge
+from beamline_tango import simulators
+from beamline_tango.devices import vacuum_gauge
 
-VACUUM_DIR = Path(__file__).resolve().parent.parent
-SIMULATOR_SCRIPT = VACUUM_DIR / "fake_modbus_vacuum.py"
+SIMULATORS_DIR = Path(simulators.__file__).resolve().parent
+SIMULATOR_SCRIPT = SIMULATORS_DIR / "fake_modbus_vacuum.py"
 POLL_THREAD_NAME = "VacuumGauge-poll"
 
 

@@ -9,12 +9,12 @@ lint:
   image: gitlab.beamline:5050/beamline/tango-devices/tango-ci:latest
   script:
     # Every Python directory of the repo (the Sept 2026 practice code was
-    # removed in handbook Part 3 Ch23; taurus_gui/ joined in Ch32). Settings
-    # are in ruff.toml.
-    - ruff check linac/magnet/ linac/camera/ linac/beam/ linac/vacuum/ linac/safety/ sardana_controllers/ taurus_gui/
+    # removed in handbook Part 3 Ch23; taurus_gui/ joined in Ch32; the package
+    # layout src/ tests/ tools/ since Part 4 Ch33). Settings are in ruff.toml.
+    - ruff check src/ tests/ tools/ taurus_gui/
     # Layout is enforced too, on the same paths (handbook Part 3 Ch29; the
     # tree was formatted once before this check went in).
-    - ruff format --check linac/magnet/ linac/camera/ linac/beam/ linac/vacuum/ linac/safety/ sardana_controllers/ taurus_gui/
+    - ruff format --check src/ tests/ tools/ taurus_gui/
 
 test-runner:
   stage: test
@@ -23,7 +23,8 @@ test-runner:
   image: gitlab.beamline:5050/beamline/tango-devices/tango-ci:latest
   script:
     # Self-contained: each suite starts its devices with DeviceTestContext,
-    # so no Tango database is needed. vacuum/ and safety/ (process=False)
+    # so no Tango database is needed; pyproject.toml puts src/ on the path.
+    # vacuum/ and safety/ (process=False)
     # come first, before any suite starts a device in a subprocess.
     # The job also fails on any "Fatal Python error": the forked device
     # servers' crash traces never failed a test, so they used to pass
@@ -31,7 +32,7 @@ test-runner:
     # because a pipe would report tee's. The JUnit report feeds the
     # pipeline's Tests tab (Ch29).
     - |
-      { python3 -m pytest linac/vacuum/tests/ linac/safety/tests/ linac/magnet/tests/ linac/camera/tests/ linac/beam/tests/ -v --junitxml=report.xml && rc=0 || rc=$?; echo "$rc" > pytest.rc; } 2>&1 | tee pytest.log
+      { python3 -m pytest tests/vacuum/ tests/safety/ tests/magnet/ tests/camera/ tests/beam/ -v --junitxml=report.xml && rc=0 || rc=$?; echo "$rc" > pytest.rc; } 2>&1 | tee pytest.log
       rc=$(cat pytest.rc)
       if grep -n "Fatal Python error" pytest.log; then
         echo "test-runner: crash trace(s) in the log above (pytest exit $rc)"
@@ -61,4 +62,4 @@ test-sardana:
     # restarts the real faradaycup1 process with local pgrep/subprocess,
     # which cannot reach tango-ds.beamline from this container. Run it on
     # tango-ds.beamline itself.
-    - TANGO_HOST=tango-db.beamline:10000 python3 -m pytest sardana_controllers/tests/ -v --ignore=sardana_controllers/tests/test_state_one_fault_handling.py
+    - TANGO_HOST=tango-db.beamline:10000 python3 -m pytest tests/sardana/ -v --ignore=tests/sardana/test_state_one_fault_handling.py

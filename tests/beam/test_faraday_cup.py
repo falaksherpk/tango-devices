@@ -48,11 +48,12 @@ import tango
 from tango import DevState
 from tango.test_context import DeviceTestContext
 
-import faraday_cup
+from beamline_tango import simulators
+from beamline_tango.devices import faraday_cup
 
-BEAM_DIR = Path(__file__).resolve().parent.parent
-PICOAMMETER_SCRIPT = BEAM_DIR / "fake_picoammeter.py"
-ADAPTER_SCRIPT = BEAM_DIR / "fake_prologix_adapter.py"
+SIMULATORS_DIR = Path(simulators.__file__).resolve().parent
+PICOAMMETER_SCRIPT = SIMULATORS_DIR / "fake_picoammeter.py"
+ADAPTER_SCRIPT = SIMULATORS_DIR / "fake_prologix_adapter.py"
 
 BASELINE_CURRENT = 2.5e-9
 BASELINE_TOLERANCE = 5e-10

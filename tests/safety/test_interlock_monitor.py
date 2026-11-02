@@ -37,10 +37,11 @@ from pymodbus.pdu import ExceptionResponse
 from tango import DevFailed, DevState
 from tango.test_context import DeviceTestContext
 
-import interlock_monitor
+from beamline_tango import simulators
+from beamline_tango.devices import interlock_monitor
 
-SAFETY_DIR = Path(__file__).resolve().parent.parent
-SIMULATOR_SCRIPT = SAFETY_DIR / "fake_modbus_plc.py"
+SIMULATORS_DIR = Path(simulators.__file__).resolve().parent
+SIMULATOR_SCRIPT = SIMULATORS_DIR / "fake_modbus_plc.py"
 POLL_THREAD_NAME = "InterlockMonitor-poll"
 
 ADDR_DOOR, ADDR_VACUUM, ADDR_WATER, ADDR_PERMIT, ADDR_FAULT, ADDR_RESET = range(6)

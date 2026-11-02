@@ -34,7 +34,7 @@ import pytest
 from tango import DevState, EventSubMode, EventType
 from tango.test_context import DeviceTestContext
 
-import ceyag_camera
+from beamline_tango.devices import ceyag_camera
 
 WIDTH = ceyag_camera.WIDTH
 HEIGHT = ceyag_camera.HEIGHT

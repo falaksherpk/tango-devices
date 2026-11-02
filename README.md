@@ -1,0 +1,37 @@
+# tango-devices
+
+The Tango Controls device servers of the beamline lab, their protocol
+simulators and the Sardana controllers (handbook Part 3, Chapters 23-32;
+packaged in Part 4, from Chapter 33). Python package `beamline_tango`,
+distribution `beamline-tango-devices`.
+
+## Layout
+
+| Path | What |
+|---|---|
+| `src/beamline_tango/devices/` | one module per device server; the module name is the Tango server name |
+| `src/beamline_tango/simulators/` | the fake instruments, on `127.0.0.1` or ptys only |
+| `src/beamline_tango/sardana_controllers/` | Sardana controllers, the Pool's `PoolPath` (no `__init__.py`: the Pool imports every `.py` file here) |
+| `tests/` | the test suites, one directory per device, plus `sardana/` (live, against the fleet) |
+| `tools/` | manual clients and one-off proofs, not part of the package |
+| `taurus_gui/` | the operator panel, run on `beamlinehost` from a checkout (not packaged) |
+
+| Server | Tango device | Protocol |
+|---|---|---|
+| `magnet_power_supply/q1` | `linac/magnet/q1` | RS-232 |
+| `ceyag_camera/ceyag1` | `linac/camera/ceyag1` | TCP/IP |
+| `faraday_cup/faradaycup1` | `linac/beam/faradaycup1` | GPIB via Prologix |
+| `vacuum_gauge/gauge1` | `linac/vacuum/gauge1` | Modbus TCP (registers) |
+| `interlock_monitor/interlock1` | `linac/safety/interlock1` | Modbus TCP (coils) |
+
+A server starts as `python3 -m beamline_tango.devices.<module> <instance>`;
+Tango takes the server name from the module's file name.
+
+## Tests
+
+`python3 -m pytest tests/vacuum/ tests/safety/ tests/magnet/ tests/camera/ tests/beam/`
+(the `process=False` suites first). `pyproject.toml` puts `src/` on the path.
+
+## License
+
+MIT, see `LICENSE`.

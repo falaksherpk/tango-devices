@@ -22,7 +22,7 @@ import serial
 from tango import AttrQuality, DevFailed, DevState
 from tango.test_context import DeviceTestContext
 
-import magnet_power_supply
+from beamline_tango.devices import magnet_power_supply
 
 
 class FakeHardware:
