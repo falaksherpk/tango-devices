@@ -26,7 +26,10 @@ if have != lock:
 print(f"runtime == lock: {len(have)} distributions, no pip")
 PY
 
-# pytest from its own lock, outside the runtime; then the suites as CI orders them.
+# pytest from its own lock, outside the runtime; then the suites as CI orders them. The pip
+# that installs it comes from a throwaway venv, which needs python3.12-venv: test tooling,
+# installed only after the runtime check above, never a dependency of the packages.
+DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends python3.12-venv
 python3.12 -m venv /tmp/fetch
 /tmp/fetch/bin/python3 -m pip --disable-pip-version-check --no-cache-dir install --quiet \
   --target /tmp/testdeps --no-deps --require-hashes --only-binary :all: -r /test/requirements/test.txt
