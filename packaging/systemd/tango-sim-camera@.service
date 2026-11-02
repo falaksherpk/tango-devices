@@ -1,0 +1,52 @@
+# Installed by beamline-tango-devices (tango-devices packaging/systemd) - do not edit;
+# override with a drop-in. Handbook Part 4, Ch33.
+# Simulator for the Tango lab, instance %i: on 127.0.0.1 or ptys only, never opened in
+# a firewall.
+# Site data in /etc/beamline-tango/%p-%i.env: SIM_PORT, SIM_FRAME_INTERVAL_S.
+[Unit]
+Description=Fake Ce:YAG camera for %i
+PartOf=tango-lab.target
+
+[Service]
+Type=simple
+User=tango
+Group=tango
+EnvironmentFile=/etc/beamline-tango/%p-%i.env
+ExecStart=/opt/beamline-tango/bin/python3 -u -m beamline_tango.simulators.fake_ceyag_camera ${SIM_PORT} ${SIM_FRAME_INTERVAL_S}
+# Started only once it can serve (Type=simple alone counts the fork).
+ExecStartPost=/usr/libexec/beamline-tango/tango-ds-wait listen ${SIM_PORT}
+Restart=on-failure
+# At most two starts per 10 s: systemd's start limit (5 in 10 s) never gives up on a unit
+# that keeps failing while a peer is missing (Ch29).
+RestartSec=5
+
+# Hardening: the fleet set (roles/healthcheck, exposure 1.5, Ch16), as proven for these
+# servers in Ch29 probe L3b. PrivateDevices keeps the host's /dev/pts, so a magnet's units
+# share socat's ptys. Nothing is writable but the runtime directory and a private /tmp.
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RemoveIPC=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+
+[Install]
+WantedBy=tango-lab.target

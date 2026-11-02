@@ -1,0 +1,10 @@
+# Installed by beamline-tango-devices (tango-devices packaging/systemd) - do not edit;
+# override with a drop-in. Handbook Part 4, Ch33.
+# The Tango lab's device servers, simulators and Sardana servers: every enabled instance of
+# the package's templates is WantedBy= and PartOf= this target, so starting, stopping or
+# restarting it acts on all of them, in the order their units give.
+[Unit]
+Description=Tango lab device servers, their simulators and Sardana
+
+[Install]
+WantedBy=multi-user.target

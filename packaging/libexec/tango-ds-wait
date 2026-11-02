@@ -1,0 +1,71 @@
+#!/bin/sh
+# Installed by beamline-tango-devices (packaging/libexec) - do not edit on the host.
+# Readiness checks for the Tango lab units, run from ExecStartPost= (handbook Part 3, Ch29).
+# The units are Type=simple, so systemd calls a process started as soon as it forks. These
+# report it started only once it can serve, so the units ordered after it find it ready.
+#
+#   tango-ds-wait listen PORT     something listens on TCP PORT
+#   tango-ds-wait path PATH...    every PATH exists (a link is followed)
+#   tango-ds-wait fd PID PATH     process PID holds the file PATH points to open
+#
+# Gives up after TANGO_DS_WAIT_SECONDS (default 10): exit 1 with a message for the
+# journal; exit 2 on a usage error. ExecStartPost= runs inside the unit's sandbox, and the
+# simulators may not open netlink sockets (RestrictAddressFamilies), so "listen" reads
+# /proc/net/tcp{,6} instead of calling ss as Ch18's beamline-wait-listen does. Like ss,
+# it never connects, so no simulator sees a stray client.
+set -eu
+
+usage() {
+  echo "usage: tango-ds-wait listen PORT | path PATH... | fd PID PATH" >&2
+  exit 2
+}
+
+listening() {
+  hex=$(printf '%04X' "$1")
+  # Only the tables that exist: awk fails outright on a missing file, and tcp6 is
+  # missing on a kernel without IPv6.
+  set --
+  for table in /proc/net/tcp /proc/net/tcp6; do
+    if [ -r "$table" ]; then
+      set -- "$@" "$table"
+    fi
+  done
+  [ "$#" -gt 0 ] || return 1
+  awk -v p=":$hex" '$4 == "0A" && substr($2, length($2) - 4) == p { f = 1 } END { exit !f }' "$@"
+}
+
+all_exist() {
+  for p in "$@"; do
+    [ -e "$p" ] || return 1
+  done
+}
+
+holds_open() {
+  target=$(readlink -f "$2") || return 1
+  for f in /proc/"$1"/fd/*; do
+    [ "$(readlink "$f" 2>/dev/null || true)" = "$target" ] && return 0
+  done
+  return 1
+}
+
+[ "$#" -ge 2 ] || usage
+mode=$1
+shift
+case "$mode" in
+  listen) [ "$#" -eq 1 ] || usage; check() { listening "$1"; } ;;
+  path) check() { all_exist "$@"; } ;;
+  fd) [ "$#" -eq 2 ] || usage; check() { holds_open "$1" "$2"; } ;;
+  *) usage ;;
+esac
+
+limit=${TANGO_DS_WAIT_SECONDS:-10}
+i=0
+while [ "$i" -lt $((limit * 10)) ]; do
+  if check "$@"; then
+    exit 0
+  fi
+  sleep 0.1
+  i=$((i + 1))
+done
+echo "tango-ds-wait: $mode $* not ready after ${limit}s" >&2
+exit 1

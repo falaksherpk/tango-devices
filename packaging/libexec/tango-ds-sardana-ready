@@ -1,0 +1,80 @@
+#!/opt/beamline-tango/bin/python3
+"""Wait until a MacroServer knows every element its Pool has (a unit's ExecStartPost).
+
+Installed by beamline-tango-devices (packaging/libexec) - do not edit on the host.
+
+usage: tango-ds-sardana-ready MACROSERVER POOL
+
+A fresh MacroServer's Door answers before the MacroServer has the Pool's element
+list, and a macro started then fails with "Moveable with name ... does not exist in
+any Pool" (handbook Part 3, Ch31). This waits until the MacroServer's Elements
+names every motor, experiment channel and measurement group the Pool has, so the
+unit counts as started only once it can run a scan. It asks for the elements the
+Pool has, not the ones the lab should have: on a fresh Pool there are none yet,
+and the role creates them only after the servers run.
+
+Gives up after TANGO_DS_WAIT_SECONDS (default 30): exit 1 with a message for the
+journal, naming what is still missing; exit 2 on a usage error.
+"""
+
+import json
+import os
+import sys
+import time
+
+import tango
+
+POOL_LISTS = ("MotorList", "ExpChannelList", "MeasurementGroupList")
+
+
+def pool_names(pool):
+    """Names of the Pool's motors, experiment channels and measurement groups."""
+    names = set()
+    for attribute in POOL_LISTS:
+        for item in pool.read_attribute(attribute).value or []:
+            names.add(json.loads(item)["name"])
+    return names
+
+
+def macroserver_names(macroserver):
+    """Names of the elements the MacroServer knows (its Elements attribute).
+
+    read_attribute, not macroserver.Elements: while the MacroServer isn't exported
+    yet, attribute-style access raises AttributeError (PyTango's __getattr__ fails
+    refreshing its command cache), not DevFailed, and the first unit start under
+    this check exited at once and looped (Ch31).
+    """
+    fmt, data = macroserver.read_attribute("Elements").value
+    if fmt != "utf8_json":
+        raise RuntimeError(f"unexpected Elements format {fmt}")
+    return {element["name"] for element in json.loads(data).get("new", [])}
+
+
+def main():
+    if len(sys.argv) != 3:
+        print(__doc__.split("\n\n")[2], file=sys.stderr)
+        sys.exit(2)
+    ms_name, pool_name = sys.argv[1:]
+    limit = float(os.environ.get("TANGO_DS_WAIT_SECONDS", "30"))
+    deadline = time.monotonic() + limit
+    missing, last_error = None, None
+    while time.monotonic() < deadline:
+        try:
+            missing = pool_names(tango.DeviceProxy(pool_name)) - macroserver_names(
+                tango.DeviceProxy(ms_name)
+            )
+            if not missing:
+                return
+        except tango.DevFailed as e:
+            last_error = e.args[0].desc.strip().splitlines()[0]
+        time.sleep(0.5)
+    reason = f"missing {sorted(missing)}" if missing else f"last error: {last_error}"
+    print(
+        f"tango-ds-sardana-ready: {ms_name} not ready after {limit:g}s, {reason}",
+        file=sys.stderr,
+    )
+    sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()
