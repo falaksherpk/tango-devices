@@ -1,0 +1,3 @@
+# The service account every unit runs as. An existing tango account (Ubuntu's Tango
+# packages create one) is left as it is.
+u tango - "Tango Controls servers"

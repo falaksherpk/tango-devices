@@ -1,0 +1,23 @@
+# The runtime is a self-contained Python venv under /opt/beamline-tango (handbook Part 4,
+# Ch33, decision D1): a local add-on package, never meant for the Debian archive.
+dir-or-file-in-opt [opt/beamline-tango/*]
+# The wheels' binaries are shipped byte-identical to the hash-locked wheels, unstripped.
+unstripped-binary-or-object [opt/beamline-tango/lib/python3.12/site-packages/*]
+# Upstream wheels bundle libraries (PyTango: libcurl, libjpeg; lxml: libxml2, zlib). They
+# are updated with the lock (requirements/runtime.txt), not by Ubuntu's security updates.
+embedded-library * [opt/beamline-tango/lib/python3.12/site-packages/*]
+# numpy's own build: these extension modules need no libc symbols of their own.
+library-not-linked-against-libc [opt/beamline-tango/lib/python3.12/site-packages/numpy/*]
+shared-library-lacks-prerequisites [opt/beamline-tango/lib/python3.12/site-packages/numpy/*]
+# The interpreter of the venv's entry points and of tango-ds-sardana-ready is the venv's
+# own Python (/opt/beamline-tango/bin/python3 -> /usr/bin/python3.12, a dependency).
+wrong-path-for-interpreter * [opt/beamline-tango/bin/*]
+wrong-path-for-interpreter * [usr/libexec/beamline-tango/tango-ds-sardana-ready]
+python3-script-but-no-python3-dep * [opt/beamline-tango/*]
+python3-script-but-no-python3-dep * [usr/libexec/beamline-tango/tango-ds-sardana-ready]
+unusual-interpreter * [opt/beamline-tango/lib/python3.12/site-packages/*]
+script-not-executable [opt/beamline-tango/lib/python3.12/site-packages/*]
+# Bytecode is compiled at build time on purpose: the units let no server write any.
+package-installs-python-pycache-dir [opt/beamline-tango/lib/python3.12/site-packages/*]
+# The package's own target groups its units (tango-lab.target, in this package).
+systemd-service-file-refers-to-unusual-wantedby-target tango-lab.target [usr/lib/systemd/system/*]

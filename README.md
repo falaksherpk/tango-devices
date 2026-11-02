@@ -32,6 +32,31 @@ Tango takes the server name from the module's file name.
 `python3 -m pytest tests/vacuum/ tests/safety/ tests/magnet/ tests/camera/ tests/beam/`
 (the `process=False` suites first). `pyproject.toml` puts `src/` on the path.
 
+## Packaging
+
+Two Debian packages for Ubuntu 24.04 (handbook Part 4, Ch33), built from one commit:
+
+- `beamline-tango-devices` (amd64): the device servers and Sardana controllers in a
+  self-contained venv, `/opt/beamline-tango`, from the hash-locked
+  `requirements/runtime.txt`; systemd template units for the servers and for Sardana's
+  Pool and MacroServer (`tango-magnet@q1.service`, ..., `tango-pool@linac.service`),
+  `tango-lab.target`, and the readiness checks in `/usr/libexec/beamline-tango/`.
+- `beamline-tango-simulators` (all): the fake instruments and their template units
+  (`tango-sim-*@.service`). A site with real instruments installs only the first.
+
+Installing them enables and starts nothing. Each instance reads its site data from
+`/etc/beamline-tango/<unit>-<instance>.env`; what a device starts after comes from
+drop-ins. Both are written by beamline-ansible's `tango_ds` role.
+
+```
+podman build -t localhost/beamline-tango-deb-builder:noble packaging/deb
+packaging/deb/build-deb.sh OUTDIR     # from HEAD, in a throwaway container
+packaging/deb/test-deb.sh OUTDIR      # install into a fresh ubuntu:24.04, run the tests
+```
+
+To change a runtime version: edit `requirements/runtime.in`, re-resolve and re-hash
+`requirements/runtime.txt` (one wheel per package, CPython 3.12, x86_64), and test.
+
 ## License
 
 MIT, see `LICENSE`.

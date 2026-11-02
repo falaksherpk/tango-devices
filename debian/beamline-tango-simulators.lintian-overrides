@@ -1,0 +1,7 @@
+# The simulators' modules live in beamline-tango-devices' venv under /opt/beamline-tango
+# (handbook Part 4, Ch33, decision D1): a local add-on package, never for the archive.
+dir-or-file-in-opt [opt/beamline-tango/*]
+script-not-executable [opt/beamline-tango/lib/python3.12/site-packages/*]
+package-installs-python-pycache-dir [opt/beamline-tango/lib/python3.12/site-packages/*]
+# The target that groups the units is beamline-tango-devices' tango-lab.target.
+systemd-service-file-refers-to-unusual-wantedby-target tango-lab.target [usr/lib/systemd/system/*]

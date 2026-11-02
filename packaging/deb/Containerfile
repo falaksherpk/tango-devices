@@ -1,0 +1,13 @@
+# Clean Ubuntu 24.04 environment for building beamline-tango-devices' .debs (handbook
+# Part 4, Ch33), as beamline-healthcheck's (Ch15): only generic tooling is baked in, and the
+# package's own Build-Depends are installed in a fresh container for every build
+# (apt-get build-dep), so one missing from debian/control fails the build.
+# Base pinned by manifest-list digest (ubuntu:24.04 as pulled on 2026-10-07).
+FROM docker.io/library/ubuntu:24.04@sha256:534baea6a22c03a63003dbc8dbe78fe34bc0d7e595d9a9dc9834884ff530eb55
+
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends build-essential dpkg-dev lintian \
+ && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /build

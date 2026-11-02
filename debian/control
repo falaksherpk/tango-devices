@@ -1,0 +1,39 @@
+Source: beamline-tango-devices
+Section: misc
+Priority: optional
+Maintainer: Falak Sher <45312905+falaksherpk@users.noreply.github.com>
+Build-Depends:
+ debhelper-compat (= 13),
+ dh-sequence-installsysusers,
+ python3-setuptools,
+ python3-wheel,
+ python3.12-venv,
+Standards-Version: 4.6.2
+Rules-Requires-Root: no
+Homepage: https://gitlab.beamline/beamline/tango-devices
+
+Package: beamline-tango-devices
+Architecture: amd64
+Depends:
+ ${misc:Depends},
+ ${shlibs:Depends},
+ python3.12,
+Description: Tango device servers of the beamline lab, with their own runtime
+ The beamline lab's five Tango device servers (magnet power supply, Ce:YAG
+ camera, Faraday cup, vacuum gauge, interlock monitor) and its Sardana
+ controllers, in a self-contained, hash-locked Python environment under
+ /opt/beamline-tango (PyTango, pymodbus, Sardana). It ships systemd template
+ units for the servers and for Sardana's Pool and MacroServer; installing the
+ package enables and starts nothing.
+
+Package: beamline-tango-simulators
+Architecture: all
+Depends:
+ ${misc:Depends},
+ beamline-tango-devices (= ${source:Version}),
+ socat,
+Description: protocol simulators for the beamline lab's Tango device servers
+ Fake instruments speaking each device's real protocol (RS-232 over a socat
+ pty pair, TCP/IP, GPIB through a Prologix adapter, Modbus TCP), on 127.0.0.1
+ or ptys only, with systemd template units. A site with real instruments
+ installs beamline-tango-devices alone.

@@ -1,0 +1,7 @@
+packaging/systemd/tango-sim-magnet-link@.service usr/lib/systemd/system
+packaging/systemd/tango-sim-magnet-psu@.service usr/lib/systemd/system
+packaging/systemd/tango-sim-picoammeter@.service usr/lib/systemd/system
+packaging/systemd/tango-sim-prologix@.service usr/lib/systemd/system
+packaging/systemd/tango-sim-camera@.service usr/lib/systemd/system
+packaging/systemd/tango-sim-vacuum@.service usr/lib/systemd/system
+packaging/systemd/tango-sim-plc@.service usr/lib/systemd/system

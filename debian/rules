@@ -1,0 +1,71 @@
+#!/usr/bin/make -f
+# beamline-tango-devices (handbook Part 4, Ch33). The runtime is a venv built in place at
+# its final path, /opt/beamline-tango (a venv records its own path), from the hash-locked
+# wheels in requirements/runtime.txt, installed offline from $BEAMLINE_WHEELHOUSE, which
+# packaging/deb/build-deb.sh fills and verifies. This package's own wheel is built by
+# Ubuntu's setuptools and wheel (Build-Depends) in a throwaway venv that sees them, so no
+# build tool enters the runtime. dpkg-buildpackage exports SOURCE_DATE_EPOCH from
+# debian/changelog (the timestamps in the .debs); the bytecode is compiled below.
+
+VENV := /opt/beamline-tango
+PIP := $(VENV)/bin/python3 -m pip --disable-pip-version-check --no-cache-dir
+export PIP_NO_INPUT := 1
+# No pip configuration file of the build host takes part (a sandbox's compile = false did).
+export PIP_CONFIG_FILE := /dev/null
+
+%:
+	dh $@
+
+override_dh_auto_configure:
+
+override_dh_auto_build:
+	test -n "$(BEAMLINE_WHEELHOUSE)" || { echo "BEAMLINE_WHEELHOUSE is not set" >&2; exit 1; }
+	test ! -e $(VENV)/pyvenv.cfg || { echo "$(VENV) already holds a venv; build in a clean environment" >&2; exit 1; }
+	python3.12 -m venv $(VENV)
+	$(PIP) install --no-compile --no-index --find-links $(BEAMLINE_WHEELHOUSE) --require-hashes --only-binary :all: -r requirements/runtime.txt
+	python3.12 -m venv --system-site-packages debian/build-venv
+	debian/build-venv/bin/python3 -m pip --disable-pip-version-check --no-cache-dir wheel \
+	  --no-index --no-deps --no-build-isolation --wheel-dir debian/wheel .
+	$(PIP) install --no-compile --no-index --no-deps debian/wheel/beamline_tango_devices-*.whl
+	$(PIP) check
+	$(VENV)/bin/python3 -m pip uninstall --yes --quiet pip
+	find $(VENV) -name __pycache__ -prune -exec rm -rf {} +
+# Bytecode, compiled once: the units' ProtectSystem=strict lets no server write any.
+# checked-hash: validity follows the source's content, not its timestamp (reproducible);
+# -f also rewrites the one the interpreter itself wrote at startup (_distutils_hack).
+	$(VENV)/bin/python3 -m compileall -q -f -j0 --invalidation-mode checked-hash $(VENV)/lib/python3.12/site-packages
+
+# The tests run against the installed packages, in a clean container
+# (packaging/deb/test-deb.sh).
+override_dh_auto_test:
+
+override_dh_auto_install:
+	mkdir -p debian/tmp/opt
+	cp -a $(VENV) debian/tmp/opt/
+
+# The simulators' modules go to their own package.
+override_dh_install:
+	dh_install
+	mkdir -p debian/beamline-tango-simulators$(VENV)/lib/python3.12/site-packages/beamline_tango
+	mv debian/beamline-tango-devices$(VENV)/lib/python3.12/site-packages/beamline_tango/simulators \
+	   debian/beamline-tango-simulators$(VENV)/lib/python3.12/site-packages/beamline_tango/
+
+# The wheels bundle private libraries (auditwheel's <name>.libs directories, found through
+# their modules' RPATH); dpkg-shlibdeps is told where they are, so it still computes the
+# dependencies on system libraries.
+override_dh_shlibdeps:
+	dh_shlibdeps -l$$(cd debian/beamline-tango-devices && ls -d $(VENV:/%=%)/lib/python3.12/site-packages/*.libs | sed 's|^|/|' | paste -sd: -)
+
+# The wheels' shared objects are shipped as built upstream: not stripped, no dwz.
+override_dh_strip override_dh_dwz:
+
+# The bundled libraries are private (found through RPATH): no ldconfig trigger.
+override_dh_makeshlibs:
+	dh_makeshlibs --no-scripts
+
+# Units are installed, never enabled or started by the package: the tango_ds role
+# enables the instances, writes their site data, and restarts them on an upgrade.
+override_dh_installsystemd:
+
+override_dh_auto_clean:
+	rm -rf build src/*.egg-info debian/build-venv debian/wheel

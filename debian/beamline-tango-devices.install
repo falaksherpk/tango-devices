@@ -1,0 +1,11 @@
+opt/beamline-tango
+packaging/systemd/tango-lab.target usr/lib/systemd/system
+packaging/systemd/tango-magnet@.service usr/lib/systemd/system
+packaging/systemd/tango-faradaycup@.service usr/lib/systemd/system
+packaging/systemd/tango-camera@.service usr/lib/systemd/system
+packaging/systemd/tango-vacuum@.service usr/lib/systemd/system
+packaging/systemd/tango-interlock@.service usr/lib/systemd/system
+packaging/systemd/tango-pool@.service usr/lib/systemd/system
+packaging/systemd/tango-macroserver@.service usr/lib/systemd/system
+packaging/libexec/tango-ds-wait usr/libexec/beamline-tango
+packaging/libexec/tango-ds-sardana-ready usr/libexec/beamline-tango

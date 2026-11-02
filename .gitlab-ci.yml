@@ -10,11 +10,12 @@ lint:
   script:
     # Every Python directory of the repo (the Sept 2026 practice code was
     # removed in handbook Part 3 Ch23; taurus_gui/ joined in Ch32; the package
-    # layout src/ tests/ tools/ since Part 4 Ch33). Settings are in ruff.toml.
-    - ruff check src/ tests/ tools/ taurus_gui/
+    # layout src/ tests/ tools/ since Part 4 Ch33, and the packaged readiness check,
+    # which has no .py suffix). Settings are in ruff.toml.
+    - ruff check src/ tests/ tools/ taurus_gui/ packaging/libexec/tango-ds-sardana-ready
     # Layout is enforced too, on the same paths (handbook Part 3 Ch29; the
     # tree was formatted once before this check went in).
-    - ruff format --check src/ tests/ tools/ taurus_gui/
+    - ruff format --check src/ tests/ tools/ taurus_gui/ packaging/libexec/tango-ds-sardana-ready
 
 test-runner:
   stage: test

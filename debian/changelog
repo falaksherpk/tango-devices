@@ -1,0 +1,6 @@
+beamline-tango-devices (1.0.0) noble; urgency=medium
+
+  * Initial release: the device servers, simulators and Sardana controllers
+    as two packages with their own hash-locked runtime (handbook Part 4, Ch33).
+
+ -- Falak Sher <45312905+falaksherpk@users.noreply.github.com>  Mon, 02 Nov 2026 05:13:28 +0000
