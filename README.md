@@ -57,6 +57,20 @@ packaging/deb/test-deb.sh OUTDIR      # install into a fresh ubuntu:24.04, run t
 To change a runtime version: edit `requirements/runtime.in`, re-resolve and re-hash
 `requirements/runtime.txt` (one wheel per package, CPython 3.12, x86_64), and test.
 
+## CI and releases
+
+The pipeline (`.gitlab-ci.yml`, handbook Part 4 Ch34) runs for `main` and for `vX.Y.Z`
+tags. `lint`, `version-check` and the tests run in the CI image (`ci/Dockerfile`, from
+the same hash-locked runtime). On `pkg.beamline`, `build-deb` and `install-test` run for
+protected refs; for a protected `vX.Y.Z` tag, `publish-deb` puts both packages into the
+lab's apt repository (`noble`) and `release-files` keeps them with `SHA256SUMS`.
+
+A release: bump the version in `pyproject.toml`, `src/beamline_tango/__init__.py` and
+`debian/changelog` in one commit (`ci/check-versions.py` refuses a mismatch), let
+`main`'s pipeline pass, then tag that commit `vX.Y.Z` and push the tag to GitLab; only
+Maintainers may create `v*` tags. Re-running `publish-deb` is safe: a package already
+published with the same bytes is skipped, one with different bytes is refused.
+
 ## License
 
 MIT, see `LICENSE`.

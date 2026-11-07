@@ -1,9 +1,25 @@
-# The CI image is named by tag and digest: the tag is the commit whose ci/Dockerfile built
-# it (on gitlab.beamline, handbook Part 4 Ch34), the digest makes the reference immutable.
-# A new image means a new tag and digest here, in one commit.
+# Pipelines run for main and for vX.Y.Z tags only (handbook Part 4 Ch34, as Ch17).
+# lint, version-check and the tests run on the Docker runner (tag tango-ci) in the CI
+# image. The image is named by tag and digest: the tag is the commit whose ci/Dockerfile
+# built it (on gitlab.beamline), the digest makes the reference immutable. A new image
+# means a new tag and digest here, in one commit.
+# build-deb and install-test run on pkg.beamline's shell runner (tag pkg-tango, protected
+# refs only, so they run for main and protected tags); publish-deb and release-files
+# only for a protected vX.Y.Z tag.
+workflow:
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+default:
+  interruptible: true
+
 stages:
   - lint
   - test
+  - build
+  - verify
+  - publish
 
 lint:
   stage: lint
@@ -14,11 +30,21 @@ lint:
     # Every Python directory of the repo (the Sept 2026 practice code was
     # removed in handbook Part 3 Ch23; taurus_gui/ joined in Ch32; the package
     # layout src/ tests/ tools/ since Part 4 Ch33, and the packaged readiness check,
-    # which has no .py suffix). Settings are in ruff.toml.
-    - ruff check src/ tests/ tools/ taurus_gui/ packaging/libexec/tango-ds-sardana-ready
+    # which has no .py suffix; ci/ since Part 4 Ch34). Settings are in ruff.toml.
+    - ruff check src/ tests/ tools/ taurus_gui/ ci/ packaging/libexec/tango-ds-sardana-ready
     # Layout is enforced too, on the same paths (handbook Part 3 Ch29; the
     # tree was formatted once before this check went in).
-    - ruff format --check src/ tests/ tools/ taurus_gui/ packaging/libexec/tango-ds-sardana-ready
+    - ruff format --check src/ tests/ tools/ taurus_gui/ ci/ packaging/libexec/tango-ds-sardana-ready
+
+# The version is written in pyproject.toml, src/beamline_tango/__init__.py and
+# debian/changelog; in a tag pipeline the tag must say the same.
+version-check:
+  stage: lint
+  tags:
+    - tango-ci
+  image: gitlab.beamline:5050/beamline/tango-devices/tango-ci:53d5da3@sha256:6322fb797756888ab9dff887169191ec3c4105ad3fec57ee2ef751f76b09efe1
+  script:
+    - python3 ci/check-versions.py
 
 test-runner:
   stage: test
@@ -67,3 +93,76 @@ test-sardana:
     # which cannot reach tango-ds.beamline from this container. Run it on
     # tango-ds.beamline itself.
     - TANGO_HOST=tango-db.beamline:10000 python3 -m pytest tests/sardana/ -v --ignore=tests/sardana/test_state_one_fault_handling.py
+
+# On pkg.beamline (shell executor, as gitlab-runner, rootless Podman). Protected refs only:
+# runner #3 takes nothing else, so an unprotected ref would wait for it forever.
+.pkg:
+  tags:
+    - pkg-tango
+  rules:
+    - if: $CI_COMMIT_REF_PROTECTED == "true"
+
+# The two .debs from the committed HEAD in the builder container (Part 4 Ch33). The
+# builder image is built from the repository's Containerfile first (base pinned by
+# digest); the runtime's wheels are cached in gitlab-runner's ~/.cache and checked
+# against requirements/runtime.txt's hashes at every build.
+build-deb:
+  extends: .pkg
+  stage: build
+  script:
+    - podman build --quiet --tag localhost/beamline-tango-deb-builder:noble packaging/deb
+    - packaging/deb/build-deb.sh dist/deb
+  artifacts:
+    paths:
+      - dist/deb/
+    expire_in: 1 week
+
+# Both .debs installed into a fresh ubuntu:24.04 (pinned by digest), the device suites
+# run against the installed code (Part 4 Ch33).
+install-test:
+  extends: .pkg
+  stage: verify
+  needs:
+    - build-deb
+  script:
+    - packaging/deb/test-deb.sh dist/deb
+
+# Releases: one at a time, never interrupted, for a protected vX.Y.Z tag only.
+.release:
+  tags:
+    - pkg-tango
+  stage: publish
+  interruptible: false
+  resource_group: release
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/ && $CI_COMMIT_REF_PROTECTED == "true"
+
+# Both .debs into apt noble on pkg.beamline, as the repository owner through the one
+# sudo rule; an identical file already published is skipped, a different one refused.
+publish-deb:
+  extends: .release
+  needs:
+    - build-deb
+    - install-test
+  variables:
+    PUBLISH_DROP: /var/spool/beamline-publish
+  script:
+    - ci/publish-deb.sh dist/deb
+
+# The release record: both .debs, their .buildinfo and .changes, and SHA256SUMS, kept
+# without expiry. Only once the packages are published.
+release-files:
+  extends: .release
+  needs:
+    - build-deb
+    - job: publish-deb
+      artifacts: false
+  script:
+    - mkdir release
+    - cp dist/deb/*.deb dist/deb/*.buildinfo dist/deb/*.changes release/
+    - (cd release && sha256sum -- * > SHA256SUMS && cat SHA256SUMS)
+  artifacts:
+    name: "tango-devices-$CI_COMMIT_TAG"
+    paths:
+      - release/
+    expire_in: never
