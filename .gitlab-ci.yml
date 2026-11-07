@@ -1,3 +1,6 @@
+# The CI image is named by tag and digest: the tag is the commit whose ci/Dockerfile built
+# it (on gitlab.beamline, handbook Part 4 Ch34), the digest makes the reference immutable.
+# A new image means a new tag and digest here, in one commit.
 stages:
   - lint
   - test
@@ -6,7 +9,7 @@ lint:
   stage: lint
   tags:
     - tango-ci
-  image: gitlab.beamline:5050/beamline/tango-devices/tango-ci:latest
+  image: gitlab.beamline:5050/beamline/tango-devices/tango-ci:53d5da3@sha256:6322fb797756888ab9dff887169191ec3c4105ad3fec57ee2ef751f76b09efe1
   script:
     # Every Python directory of the repo (the Sept 2026 practice code was
     # removed in handbook Part 3 Ch23; taurus_gui/ joined in Ch32; the package
@@ -21,7 +24,7 @@ test-runner:
   stage: test
   tags:
     - tango-ci
-  image: gitlab.beamline:5050/beamline/tango-devices/tango-ci:latest
+  image: gitlab.beamline:5050/beamline/tango-devices/tango-ci:53d5da3@sha256:6322fb797756888ab9dff887169191ec3c4105ad3fec57ee2ef751f76b09efe1
   script:
     # Self-contained: each suite starts its devices with DeviceTestContext,
     # so no Tango database is needed; pyproject.toml puts src/ on the path.
@@ -50,7 +53,7 @@ test-sardana:
   stage: test
   tags:
     - tango-ci
-  image: gitlab.beamline:5050/beamline/tango-devices/tango-ci:latest
+  image: gitlab.beamline:5050/beamline/tango-devices/tango-ci:53d5da3@sha256:6322fb797756888ab9dff887169191ec3c4105ad3fec57ee2ef751f76b09efe1
   # Not self-contained: these tests talk to the real Pool, MacroServer and
   # device servers on tango-ds.beamline through the real database, so they
   # need the fleet up and those servers on their fixed, firewall-allowed ports:
