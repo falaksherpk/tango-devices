@@ -1,0 +1,4 @@
+# Lint tool for CI (handbook Part 4, Ch34): ruff, hash-locked, one wheel. Installed into
+# the tango-ci image only (ci/Dockerfile); neither the package nor the install test uses it.
+# Hash checked against PyPI's record and the downloaded wheel (2026-11-07).
+ruff==0.16.5 --hash=sha256:ef0f69e191a13a3c9816f63163c88790cb12cd157bbbb384e9c44745702ab105
