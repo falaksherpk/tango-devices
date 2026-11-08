@@ -10,15 +10,19 @@ DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends /d
 dpkg-query -W -f '${Package} ${Version} ${Architecture}\n' 'beamline-tango-*'
 id tango
 
-# The runtime holds exactly the lock's 17 distributions plus this package, and no pip.
-/opt/beamline-tango/bin/python3 -I - /test/requirements/runtime.txt << 'PY'
+# The runtime holds exactly the lock's 17 distributions plus this package, and no pip. This
+# package's version is the installed .deb's, never a literal: the "1.0.0" written here
+# failed 1.0.1's install test (handbook Part 4, Ch35). Native X.Y.Z versions only, as
+# ci/check-versions.py keeps them, so dpkg's and Python's spellings are the same.
+/opt/beamline-tango/bin/python3 -I - /test/requirements/runtime.txt \
+  "$(dpkg-query -W -f '${Version}' beamline-tango-devices)" << 'PY'
 import importlib.metadata as md, re, sys
 lock = {}
 for line in open(sys.argv[1]):
     m = re.match(r"^([A-Za-z0-9._-]+)==(\S+)", line)
     if m:
         lock[re.sub(r"[-_.]+", "-", m.group(1)).lower()] = m.group(2)
-lock["beamline-tango-devices"] = "1.0.0"
+lock["beamline-tango-devices"] = sys.argv[2]
 have = {re.sub(r"[-_.]+", "-", d.metadata["Name"]).lower(): d.version for d in md.distributions()}
 if have != lock:
     print("runtime differs from the lock:", sorted(set(have.items()) ^ set(lock.items())))
