@@ -1,3 +1,13 @@
+beamline-tango-devices (1.1.0) noble; urgency=medium
+
+  * beamline_tango.exporter and tango-exporter@.service: a Prometheus
+    exporter for the lab's Tango devices (State, listed attributes, its
+    own failed reads, the HDB++ EventSubscriber's statistics), scraped
+    from obs.beamline (handbook Part 4, Ch36).
+  * The runtime gains prometheus-client 0.26.0.
+
+ -- Falak Sher <45312905+falaksherpk@users.noreply.github.com>  Sun, 08 Nov 2026 12:00:00 +0000
+
 beamline-tango-devices (1.0.1) noble; urgency=medium
 
   * tango-sim-magnet-link@.service: SuccessExitStatus=143. socat exits with
