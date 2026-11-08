@@ -62,7 +62,7 @@ test-runner:
     # because a pipe would report tee's. The JUnit report feeds the
     # pipeline's Tests tab (Ch29).
     - |
-      { python3 -m pytest tests/vacuum/ tests/safety/ tests/magnet/ tests/camera/ tests/beam/ -v --junitxml=report.xml && rc=0 || rc=$?; echo "$rc" > pytest.rc; } 2>&1 | tee pytest.log
+      { python3 -m pytest tests/vacuum/ tests/safety/ tests/magnet/ tests/camera/ tests/beam/ tests/exporter/ -v --junitxml=report.xml && rc=0 || rc=$?; echo "$rc" > pytest.rc; } 2>&1 | tee pytest.log
       rc=$(cat pytest.rc)
       if grep -n "Fatal Python error" pytest.log; then
         echo "test-runner: crash trace(s) in the log above (pytest exit $rc)"

@@ -10,7 +10,7 @@ DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends /d
 dpkg-query -W -f '${Package} ${Version} ${Architecture}\n' 'beamline-tango-*'
 id tango
 
-# The runtime holds exactly the lock's 17 distributions plus this package, and no pip. This
+# The runtime holds exactly the lock's distributions plus this package, and no pip. This
 # package's version is the installed .deb's, never a literal: the "1.0.0" written here
 # failed 1.0.1's install test (handbook Part 4, Ch35). Native X.Y.Z versions only, as
 # ci/check-versions.py keeps them, so dpkg's and Python's spellings are the same.
@@ -40,7 +40,7 @@ python3.12 -m venv /tmp/fetch
 cd /test
 rc=0
 PYTHONPATH=/tmp/testdeps /opt/beamline-tango/bin/python3 -m pytest -p no:cacheprovider \
-  tests/vacuum/ tests/safety/ tests/magnet/ tests/camera/ tests/beam/ 2>&1 | tee /tmp/pytest.log || rc=$?
+  tests/vacuum/ tests/safety/ tests/magnet/ tests/camera/ tests/beam/ tests/exporter/ 2>&1 | tee /tmp/pytest.log || rc=$?
 if grep -n "Fatal Python error" /tmp/pytest.log; then
   echo "test-in-container: crash trace(s) in the log above (pytest exit $rc)"
   exit 1

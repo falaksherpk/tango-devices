@@ -1,0 +1,54 @@
+# Installed by beamline-tango-devices (tango-devices packaging/systemd) - do not edit;
+# override with a drop-in. Handbook Part 4, Ch36.
+# Prometheus exporter for the lab's Tango devices, instance %i.
+# Site data in /etc/beamline-tango/%p-%i.env (the tango_ds role): TANGO_HOST,
+# TANGO_EXPORTER_LISTEN, TANGO_EXPORTER_DEVICES, TANGO_EXPORTER_ATTRIBUTES,
+# TANGO_EXPORTER_HDBPP, TANGO_EXPORTER_TIMEOUT_MS (python3 -m beamline_tango.exporter
+# documents them). A Tango client only: it serves no device and binds no ORB port.
+[Unit]
+Description=Prometheus exporter for the Tango devices (%i)
+# Not PartOf=tango-lab.target: the exporter keeps running while the lab is stopped, so
+# Prometheus sees the devices go down instead of losing the target that reports them.
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=tango
+Group=tango
+EnvironmentFile=/etc/beamline-tango/%p-%i.env
+ExecStart=/opt/beamline-tango/bin/python3 -u -m beamline_tango.exporter
+# A configuration it refuses exits 2 and is retried every 5 s; the start limit never
+# gives up (as the servers, Ch29), and Prometheus's TargetDown shows it meanwhile.
+Restart=on-failure
+RestartSec=5
+
+# Hardening: the device servers' set (Ch29 probe L3b), unchanged.
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+# AF_NETLINK: libzmq, loaded with PyTango, needs it (Ch29 probe L3).
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RemoveIPC=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+
+[Install]
+WantedBy=multi-user.target

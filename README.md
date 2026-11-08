@@ -29,7 +29,7 @@ Tango takes the server name from the module's file name.
 
 ## Tests
 
-`python3 -m pytest tests/vacuum/ tests/safety/ tests/magnet/ tests/camera/ tests/beam/`
+`python3 -m pytest tests/vacuum/ tests/safety/ tests/magnet/ tests/camera/ tests/beam/ tests/exporter/`
 (the `process=False` suites first). `pyproject.toml` puts `src/` on the path.
 
 ## Packaging
@@ -40,7 +40,9 @@ Two Debian packages for Ubuntu 24.04 (handbook Part 4, Ch33), built from one com
   self-contained venv, `/opt/beamline-tango`, from the hash-locked
   `requirements/runtime.txt`; systemd template units for the servers and for Sardana's
   Pool and MacroServer (`tango-magnet@q1.service`, ..., `tango-pool@linac.service`),
-  `tango-lab.target`, and the readiness checks in `/usr/libexec/beamline-tango/`.
+  `tango-lab.target`, the readiness checks in `/usr/libexec/beamline-tango/`, and the
+  Prometheus exporter `tango-exporter@.service` (`python3 -m beamline_tango.exporter`;
+  its settings are in the module's docstring), which is not part of `tango-lab.target`.
 - `beamline-tango-simulators` (all): the fake instruments and their template units
   (`tango-sim-*@.service`). A site with real instruments installs only the first.
 
