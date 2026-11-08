@@ -6,6 +6,8 @@
 # For CPython 3.12 on x86_64 (Ubuntu 24.04.5). Installed with:
 #   pip install --require-hashes --only-binary :all: -r requirements/runtime.txt
 # Change a version: edit requirements/runtime.in, re-resolve, re-hash, and test.
+# Ch36 (2026-11-08): prometheus-client 0.26.0 for the exporter; pure Python, no required
+# dependencies; hash the same in PyPI's record and the downloaded wheel.
 click==8.1.6 --hash=sha256:fa244bb30b3b5ee2cae3da8f55c9e5e0c0e86093306301fb418eb9dc40fbded5
 docstring-parser==0.18.0 --hash=sha256:b3fcbed555c47d8479be0796ef7e19c2670d428d72e96da63f3a40122860374b
 flexcache==0.3 --hash=sha256:d43c9fea82336af6e0115e308d9d33a185390b8346a017564611f1466dcd2e32
@@ -15,6 +17,7 @@ numpy==2.5.4 --hash=sha256:fbde6962867ee75b48b0ee29b2b9372ec5d617799dbaf38e82dc0
 packaging==24.0 --hash=sha256:2ddfb553fdf02fb784c234c7ba6ccc288296ceabec964ad2eae3777778130bc5
 pint==0.26.2 --hash=sha256:c94124cdb19baa1a84bb65c8bb9a620a9636b9b9cd80f32f30ad7ff795ea2eb8
 platformdirs==4.13.5 --hash=sha256:53d3ec4280b815c1e0b02edad7f9ee8fda1ba9c0865dd9c2e6e63849ce82fc1e
+prometheus-client==0.26.0 --hash=sha256:fa93d06737aa02bacd05794768508bb97d2fbee28cb3bca04eaae92f0ca953d6
 psutil==7.2.2 --hash=sha256:076a2d2f923fd4821644f5ba89f059523da90dc9014e85f8e45a5774ca5bc6f9
 pymodbus==3.15.0 --hash=sha256:74d8dee961f23845f18a8481253183504dca05c4fcd102890cd28f4d7ce09267
 pyserial==3.5 --hash=sha256:c4451db6ba391ca6ca299fb3ec7bae67a5c55dde170964c7a14ceefec02f2cf0

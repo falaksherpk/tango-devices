@@ -20,6 +20,8 @@ dependencies = [
     "numpy>=2",
     "pyserial>=3.5",
     "pymodbus>=3.15,<3.16",
+    # The exporter (Ch36); 0.x, so a minor release may change the API.
+    "prometheus-client>=0.26,<0.27",
 ]
 
 [project.optional-dependencies]
