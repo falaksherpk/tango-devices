@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "beamline-tango-devices"
-version = "1.0.0"
+version = "1.0.1"
 description = "Tango device servers, protocol simulators and Sardana controllers of the beamline lab"
 readme = "README.md"
 requires-python = ">=3.12"

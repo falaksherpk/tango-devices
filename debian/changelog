@@ -1,3 +1,11 @@
+beamline-tango-devices (1.0.1) noble; urgency=medium
+
+  * tango-sim-magnet-link@.service: SuccessExitStatus=143. socat exits with
+    status 143 when it is stopped (SIGTERM), so every stop of the magnet's
+    link ended the unit "failed" (handbook Part 4, Ch35).
+
+ -- Falak Sher <45312905+falaksherpk@users.noreply.github.com>  Sun, 08 Nov 2026 05:25:00 +0000
+
 beamline-tango-devices (1.0.0) noble; urgency=medium
 
   * Initial release: the device servers, simulators and Sardana controllers

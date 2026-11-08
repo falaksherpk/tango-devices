@@ -11,6 +11,9 @@ Type=simple
 User=tango
 Group=tango
 ExecStart=/usr/bin/socat -d pty,raw,echo=0,link=/run/tango-magnet-%i/psu pty,raw,echo=0,link=/run/tango-magnet-%i/dev
+# socat ends with exit status 143 (128 + SIGTERM) when systemd stops it: its normal stop,
+# not a failure. Without this every stop left the unit "failed" (handbook Part 4, Ch35).
+SuccessExitStatus=143
 RuntimeDirectory=tango-magnet-%i
 # Started only once it can serve (Type=simple alone counts the fork).
 ExecStartPost=/usr/libexec/beamline-tango/tango-ds-wait path /run/tango-magnet-%i/psu /run/tango-magnet-%i/dev
