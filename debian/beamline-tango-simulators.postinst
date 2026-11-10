@@ -1,0 +1,15 @@
+#!/bin/sh
+# Load the unit files this package has just installed or replaced (Part 4,
+# Ch38). Running units keep the definition systemd loaded until a reload, so a
+# restart after an upgrade would use the old one (Ch35, THEORY 35.2). The
+# package enables and starts nothing: the tango_ds role does that, and reloads
+# too. This covers an apt install outside the role, such as a rollback by hand.
+set -e
+
+#DEBHELPER#
+
+if [ "$1" = "configure" ] && [ -d /run/systemd/system ]; then
+    systemctl --system daemon-reload >/dev/null || true
+fi
+
+exit 0

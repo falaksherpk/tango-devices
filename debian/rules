@@ -65,6 +65,9 @@ override_dh_makeshlibs:
 
 # Units are installed, never enabled or started by the package: the tango_ds role
 # enables the instances, writes their site data, and restarts them on an upgrade.
+# Empty, so debhelper adds no systemd snippets; each package's hand-written
+# postinst only runs daemon-reload, so systemd loads the new unit files even
+# when apt runs outside the role (Part 4 Ch38).
 override_dh_installsystemd:
 
 override_dh_auto_clean:
