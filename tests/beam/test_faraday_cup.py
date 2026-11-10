@@ -376,5 +376,72 @@ def test_heals_when_instrument_returns_behind_live_adapter(device, fake_hardware
     while time.time() < deadline and device.state() != DevState.ON:
         time.sleep(0.05)
     assert device.state() == DevState.ON
-    value = device.current
+    # current is polled (Ch38): a client read comes from the polling buffer,
+    # which may still hold the failed read for up to one period (1000 ms).
+    deadline = time.time() + 2.0
+    while True:
+        try:
+            value = device.current
+            break
+        except tango.DevFailed:
+            if time.time() > deadline:
+                raise
+            time.sleep(0.1)
     assert abs(value - BASELINE_CURRENT) < BASELINE_TOLERANCE
+
+
+# Ch38 (Part 4): the device's poll loop called push_change_event("current")
+# from the asyncio loop while Tango's polling thread also read `current`. A
+# polled read then failed now and then with API_AttrValueNotSet ("Read value
+# for attribute current has not been updated"), about 12 an hour on the fleet,
+# archived by HDB++ as an error row. Polling now sends the change events
+# itself, and the loop no longer touches the attribute.
+
+
+def test_current_change_events_come_from_polling(device):
+    # The fixture's poll loop runs every 100 ms; polling runs every 1000 ms.
+    events = []
+    eid = device.subscribe_event("current", tango.EventType.CHANGE_EVENT, events.append)
+    try:
+        time.sleep(3.0)
+    finally:
+        device.unsubscribe_event(eid)
+    good = [e for e in events if not e.err]
+    assert 2 <= len(good) <= 5, (
+        f"{len(good)} change events in 3 s: want one per 1000 ms poll, "
+        "not one per 100 ms loop pass"
+    )
+    assert device.get_attribute_poll_period("current") == 1000
+
+
+def test_polled_reads_of_current_never_fail(fake_hardware):
+    # Fast polling against a fast loop: today's collision rate in minutes.
+    with DeviceTestContext(
+        faraday_cup.FaradayCup,
+        properties={
+            "PrologixHost": "localhost",
+            "PrologixPort": fake_hardware["adapter_port"],
+            "GpibAddress": 22,
+            "PollIntervalMs": 10,
+        },
+        process=True,
+    ) as proxy:
+        for name in ("current", "zero_check"):
+            proxy.poll_attribute(name, 20)
+        proxy.poll_command("State", 20)
+        time.sleep(0.5)  # let the first polls fill the history
+        seen, failed = set(), []
+        deadline = time.time() + 20.0
+        while time.time() < deadline:
+            for rec in proxy.attribute_history("current", 10):
+                stamp = rec.time.totime()
+                if stamp in seen:
+                    continue
+                seen.add(stamp)
+                if rec.has_failed:
+                    failed.append(rec.get_err_stack()[0].desc)
+            time.sleep(0.08)
+    assert len(seen) > 500, f"only {len(seen)} polled records"
+    assert failed == [], (
+        f"{len(failed)} of {len(seen)} polled reads failed: {failed[:3]}"
+    )

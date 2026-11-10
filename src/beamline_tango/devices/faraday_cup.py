@@ -18,8 +18,11 @@ Design notes:
   round trip: one physical GPIB-style channel, no concurrent interleave.
   Opening a new link happens under the same lock and closes the old one
   first, so Reconnect and the poll loop's own reconnect can't race.
-- current is pushed as a change event on every successful poll. It is
-  not archived here (HDB++, Ch30).
+- current's change events come from Tango's polling (1000 ms, abs_change
+  1 pA, below the instrument's noise), not from the poll loop: a push from
+  the asyncio loop while the polling thread read the same attribute made a
+  polled read fail now and then with API_AttrValueNotSet (Part 4, Ch38).
+  It is not archived here (HDB++, Ch30).
 - Poll-loop resilience: exponential backoff (capped) plus an active
   reconnect attempt each cycle while in FAULT, so the device heals
   itself once the adapter is back. The backoff resets only after a
@@ -64,7 +67,8 @@ class FaradayCup(Device):
         self._poll_count = 0
         self.set_state(DevState.INIT)
         self.set_status("Initialising")
-        self.set_change_event("current", True, False)
+        # Tango detects current's changes from polling (Ch38).
+        self.set_change_event("current", True, True)
 
         # Property validation: a real GPIB bus address is 0-30 (5-bit
         # primary address); PollIntervalMs must be positive or the poll
@@ -179,9 +183,10 @@ class FaradayCup(Device):
         while True:
             if self._writer is not None:
                 try:
-                    value = await self._read_current()
+                    # The read checks the link (ON/FAULT, reconnect); the
+                    # value reaches clients through polling (Ch38).
+                    await self._read_current()
                     self._poll_count += 1
-                    self.push_change_event("current", value)
                     if self.get_state() != DevState.ON:
                         self.set_state(DevState.ON)
                         self.set_status("Connected, polling")
@@ -210,7 +215,14 @@ class FaradayCup(Device):
             await asyncio.sleep(backoff_s)
             backoff_s = min(backoff_s * 2, BACKOFF_CAP_S)
 
-    @attribute(dtype=float, label="Current", unit="A", format="%.6E")
+    @attribute(
+        dtype=float,
+        label="Current",
+        unit="A",
+        format="%.6E",
+        abs_change="1e-12",
+        polling_period=1000,
+    )
     async def current(self):
         return await self._read_current()
 
