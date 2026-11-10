@@ -173,6 +173,20 @@ def test_reconnect_command(device):
     assert abs(value - BASELINE_CURRENT) < BASELINE_TOLERANCE
 
 
+def test_failed_reconnect_is_reported_in_status_not_raised(device, fake_hardware):
+    # Ch38, item 6 (Ch32, 1 Nov): a failed Reconnect raised a raw Python
+    # error, which the panel showed as a dialog; the camera reports the reason
+    # in Status and stays FAULT while it redials. The cup now does the same,
+    # and its poll loop no longer overwrites that reason on every cycle.
+    stop_proc(fake_hardware["adapter_proc"])
+    device.command_inout("Reconnect")  # must not raise
+    assert device.state() == DevState.FAULT
+    assert "Reconnect failed" in device.status()
+    time.sleep(1.0)  # about ten poll-loop cycles at PollIntervalMs=100
+    assert device.state() == DevState.FAULT
+    assert "Reconnect failed" in device.status(), device.status()
+
+
 def test_concurrent_reconnect_does_not_race(device):
     """Regression test for a real race condition found and fixed live
     during Chapter 4 development: two concurrent Reconnect calls each

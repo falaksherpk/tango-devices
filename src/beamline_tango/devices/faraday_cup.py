@@ -197,7 +197,9 @@ class FaradayCup(Device):
                     log.error("poll loop error: %s", e)
                     self.set_state(DevState.FAULT)
                     self.set_status(f"Read failed: {e}")
-            else:
+            elif self.get_state() != DevState.FAULT:
+                # Once per outage, as the camera (Ch38): a Status that already
+                # gives the reason (a failed Reconnect, a failed read) stays.
                 self.set_state(DevState.FAULT)
                 self.set_status("No connection to adapter")
 
@@ -250,8 +252,22 @@ class FaradayCup(Device):
         """Re-establish the device->adapter TCP link and replay the setup
         sequence. Cannot fix a broken adapter->instrument link -- that is
         outside this device's control, same caveat as the camera's
-        Reconnect re: its own fake simulator."""
-        await self._connect_and_setup()
+        Reconnect re: its own fake simulator.
+
+        A failure is reported as the camera reports it (Ch38): FAULT, with
+        the reason in Status, while the poll loop keeps redialling. The
+        command itself succeeds; it used to raise a raw Python error."""
+        try:
+            await self._connect_and_setup()
+        except (TimeoutError, ConnectionRefusedError, OSError) as e:
+            msg = (
+                f"Reconnect failed: adapter at "
+                f"{self.PrologixHost}:{self.PrologixPort}: {e}"
+            )
+            log.error("%s", msg)
+            self.set_state(DevState.FAULT)
+            self.set_status(msg)
+            return
         self.set_state(DevState.ON)
         self.set_status("Reconnected, polling")
 
