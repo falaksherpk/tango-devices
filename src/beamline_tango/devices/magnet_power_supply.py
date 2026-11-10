@@ -3,9 +3,12 @@
 Magnet power supply (RS-232), linac/magnet/q1 -- handbook Part 3, Ch24.
 
 Finite-ramp-rate physics under GreenMode.Asyncio, with a truthful MOVING
-state. Every ramp tick pushes a Tango change event on 'current'; archiving
-is left to HDB++ (Ch30), which subscribes to those events, so the device
-holds no archiving code of its own.
+state. 'current' is polled every 1000 ms and Tango sends its change events
+(abs_change 1 mA) from that polling; the ramp loop no longer pushes them,
+because a push from the asyncio loop while the polling thread read the same
+attribute made a polled read fail now and then (API_AttrValueNotSet, Part 4
+Ch38). Archiving is left to HDB++ (Ch30), which subscribes to the archive
+events polling generates, so the device holds no archiving code of its own.
 
 Talks to the RS-232 magnet PSU (here fake_magnet_psu.py on the other end of
 a socat pty pair) with SCPI-style commands: CURR? and CURR <value>. The
@@ -53,7 +56,8 @@ class MagnetPowerSupply(Device):
         self._ramp_task = None
         self._ser = None
 
-        self.set_change_event("current", True, False)
+        # Tango detects current's changes from polling (Ch38).
+        self.set_change_event("current", True, True)
 
         if self.ramp_rate <= 0:
             msg = f"ramp_rate must be positive, got {self.ramp_rate}"
@@ -112,7 +116,6 @@ class MagnetPowerSupply(Device):
             else:
                 self._current = max(self._current - step, target)
             await self._write_current(self._current)
-            self.push_change_event("current", self._current)
             await asyncio.sleep(0.2)
         self.set_state(DevState.ON)
 
@@ -151,6 +154,8 @@ class MagnetPowerSupply(Device):
         max_warning=90.0,
         min_alarm=-1.0,
         max_alarm=100.0,
+        abs_change="0.001",
+        polling_period=1000,
     )
     async def current(self):
         return self._current

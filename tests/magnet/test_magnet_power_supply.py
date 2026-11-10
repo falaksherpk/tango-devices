@@ -14,11 +14,13 @@ running. Fixed by using process=True (a real subprocess), which is
 also closer to how a real device server actually runs in production.
 """
 
+import threading
 import time
 from unittest.mock import MagicMock, patch
 
 import pytest
 import serial
+import tango
 from tango import AttrQuality, DevFailed, DevState
 from tango.test_context import DeviceTestContext
 
@@ -339,3 +341,66 @@ def test_status_follows_state_after_recovery():
             proxy.Init()
             assert proxy.state() == DevState.ON
             assert "Failed" not in proxy.status()
+
+
+# Ch38 (Part 4): the ramp loop called push_change_event("current") from the
+# asyncio loop while Tango's polling thread also read `current`, so a polled
+# read failed now and then during a ramp with API_AttrValueNotSet (Ch37 F1
+# at boot; the CI flake #39). Polling now sends the change events itself.
+
+
+def ramp_back_and_forth(proxy, seconds):
+    deadline = time.time() + seconds
+    target = 100.0
+    while time.time() < deadline:
+        proxy.setpoint = target
+        target = 0.0 if target else 100.0
+        time.sleep(2.2)  # 100 A at 50 A/s, in 0.2 s ticks
+
+
+def test_current_change_events_come_from_polling(device):
+    # A 100 A ramp at 50 A/s takes 2 s: ten 0.2 s ticks, one poll a second.
+    events = []
+    eid = device.subscribe_event("current", tango.EventType.CHANGE_EVENT, events.append)
+    try:
+        ramp_back_and_forth(device, 4.0)
+    finally:
+        device.unsubscribe_event(eid)
+    good = [e for e in events if not e.err]
+    assert 2 <= len(good) <= 7, (
+        f"{len(good)} change events in about 4.4 s of ramping: want one per "
+        "1000 ms poll, not one per 0.2 s ramp tick"
+    )
+    assert device.get_attribute_poll_period("current") == 1000
+
+
+def test_polled_reads_of_current_never_fail_during_ramps(device):
+    for name in ("current", "setpoint"):
+        device.poll_attribute(name, 20)
+    device.poll_command("State", 20)
+    time.sleep(0.5)  # let the first polls fill the history
+    seen, failed = set(), []
+    stop = threading.Event()
+
+    def collect():
+        while not stop.is_set():
+            for rec in device.attribute_history("current", 10):
+                stamp = rec.time.totime()
+                if stamp in seen:
+                    continue
+                seen.add(stamp)
+                if rec.has_failed:
+                    failed.append(rec.get_err_stack()[0].desc)
+            time.sleep(0.08)
+
+    collector = threading.Thread(target=collect)
+    collector.start()
+    try:
+        ramp_back_and_forth(device, 20.0)
+    finally:
+        stop.set()
+        collector.join()
+    assert len(seen) > 500, f"only {len(seen)} polled records"
+    assert failed == [], (
+        f"{len(failed)} of {len(seen)} polled reads failed: {failed[:3]}"
+    )
