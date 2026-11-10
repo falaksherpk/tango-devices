@@ -136,6 +136,10 @@ def device(fake_hardware):
         },
         process=True,  # required for GreenMode.Asyncio -- see module docstring
     ) as proxy:
+        # Tests read the device itself, not the polling buffer: current has been
+        # polled by default since Part 4 Ch38 (1000 ms), and a buffered read can
+        # be up to a period old, e.g. just after a write (pipeline #95).
+        proxy.set_source(tango.DevSource.DEV)
         yield proxy
 
 
@@ -390,17 +394,7 @@ def test_heals_when_instrument_returns_behind_live_adapter(device, fake_hardware
     while time.time() < deadline and device.state() != DevState.ON:
         time.sleep(0.05)
     assert device.state() == DevState.ON
-    # current is polled (Ch38): a client read comes from the polling buffer,
-    # which may still hold the failed read for up to one period (1000 ms).
-    deadline = time.time() + 2.0
-    while True:
-        try:
-            value = device.current
-            break
-        except tango.DevFailed:
-            if time.time() > deadline:
-                raise
-            time.sleep(0.1)
+    value = device.current
     assert abs(value - BASELINE_CURRENT) < BASELINE_TOLERANCE
 
 

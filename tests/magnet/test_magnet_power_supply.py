@@ -67,6 +67,10 @@ def device():
                 process=True,  # required for GreenMode.Asyncio -- see module docstring
             ) as proxy,
         ):
+            # Tests read the device itself, not the polling buffer: current has been
+            # polled by default since Part 4 Ch38 (1000 ms), and a buffered read can
+            # be up to a period old, e.g. just after a write (pipeline #95).
+            proxy.set_source(tango.DevSource.DEV)
             yield proxy
 
 
