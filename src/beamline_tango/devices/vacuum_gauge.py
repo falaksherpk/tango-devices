@@ -165,10 +165,15 @@ class VacuumGauge(Device):
         and re-raise (Tango reports it to the caller as DevFailed)."""
         try:
             with self._client_lock:
-                return fn(device_id=self.ModbusDeviceId, **kwargs)
+                result = fn(device_id=self.ModbusDeviceId, **kwargs)
         except (ModbusException, OSError):
             self._drop_connection()
             raise
+        # An exception response is a refusal, not a result: a refused pump
+        # write must not count as done (Ch38).
+        if result.isError():
+            raise ModbusException(f"exception response from the gauge: {result}")
+        return result
 
     def _read_instrument(self):
         """Pressure (mbar) and pump state, in one Modbus call."""
@@ -176,8 +181,13 @@ class VacuumGauge(Device):
             result = self._client.read_holding_registers(
                 address=0, count=2, device_id=self.ModbusDeviceId
             )
-        # A Modbus exception response has no .registers: AttributeError
-        # is caught by the callers like a failed read.
+        # A Modbus exception response is a failed read. Its .registers is an
+        # empty list in pymodbus 3.15, not missing: indexing it raised
+        # IndexError, which no caller caught, so the gauge couldn't start or
+        # its poll thread died (Ch38). ModbusException is caught like any
+        # failed read.
+        if result.isError():
+            raise ModbusException(f"exception response from the gauge: {result}")
         return result.registers[0] / 1000.0, bool(result.registers[1])
 
     def _poll_loop(self):

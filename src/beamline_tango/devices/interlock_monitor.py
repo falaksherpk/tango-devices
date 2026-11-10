@@ -48,7 +48,10 @@ ADDR_PERMIT = 3
 ADDR_FAULT = 4
 ADDR_RESET = 5
 COIL_COUNT = 6
-PLC_DEVICE_ID = 1
+
+# Modbus unit/device IDs are 0-247 (247 is the last valid slave address
+# in the specification; 248-255 are reserved).
+MAX_MODBUS_DEVICE_ID = 247
 
 # Consecutive failed polls before the device declares itself FAULT.
 POLL_FAILURE_THRESHOLD = 3
@@ -69,6 +72,8 @@ THREAD_JOIN_TIMEOUT_S = MODBUS_TIMEOUT_S * (MODBUS_RETRIES + 1) + POLL_INTERVAL_
 class InterlockMonitor(Device):
     Host = device_property(dtype=str, default_value="127.0.0.1")
     Port = device_property(dtype=int, default_value=5040)
+    # The PLC's Modbus unit ID: fixed at 1 in code until Ch38 (item 7).
+    ModbusDeviceId = device_property(dtype=int, default_value=1)
 
     def init_device(self):
         Device.init_device(self)
@@ -85,6 +90,13 @@ class InterlockMonitor(Device):
 
         if not 1 <= self.Port <= 65535:
             self._fault(f"Port must be 1-65535, got {self.Port}")
+            return
+
+        if not 0 <= self.ModbusDeviceId <= MAX_MODBUS_DEVICE_ID:
+            self._fault(
+                f"ModbusDeviceId must be 0-{MAX_MODBUS_DEVICE_ID}, "
+                f"got {self.ModbusDeviceId}"
+            )
             return
 
         self._client = ModbusTcpClient(
@@ -128,10 +140,15 @@ class InterlockMonitor(Device):
     def _read_coils(self):
         with self._client_lock:
             result = self._client.read_coils(
-                address=0, count=COIL_COUNT, device_id=PLC_DEVICE_ID
+                address=0, count=COIL_COUNT, device_id=self.ModbusDeviceId
             )
-        # A Modbus exception response has no .bits: AttributeError is
-        # caught by the callers like a failed read.
+        # A Modbus exception response is a failed read. Its .bits is an empty
+        # list in pymodbus 3.15, not missing: indexing it raised IndexError,
+        # which no caller caught, and the poll thread died with the last coil
+        # values still served (Ch38). ModbusException is caught like any
+        # failed read: FAULT after POLL_FAILURE_THRESHOLD, then recovery.
+        if result.isError():
+            raise ModbusException(f"exception response from the PLC: {result}")
         bits = result.bits
         return {
             "door": bits[ADDR_DOOR],
@@ -243,7 +260,7 @@ class InterlockMonitor(Device):
         try:
             with self._client_lock:
                 result = self._client.write_coil(
-                    address=ADDR_RESET, value=True, device_id=PLC_DEVICE_ID
+                    address=ADDR_RESET, value=True, device_id=self.ModbusDeviceId
                 )
         except (ModbusException, OSError) as e:
             self._drop_connection()

@@ -37,6 +37,7 @@ import pytest
 import tango
 from tango import DevFailed, DevState
 from pymodbus.client import ModbusTcpClient
+from pymodbus.pdu import ExceptionResponse
 from tango.test_context import DeviceTestContext
 
 from beamline_tango import simulators
@@ -659,3 +660,30 @@ def test_pump_never_commanded_is_not_reported(device, fake_hardware):
     write_pump_register(fake_hardware["port"], 1)
     time.sleep(2.5)
     assert device.state() == DevState.ON
+
+
+# --- Exception responses to a read (Part 4 Ch38) ----------------------
+#
+# pymodbus 3.15's ExceptionResponse has empty .registers, not none, so a
+# read answered with a Modbus exception raised IndexError, which nothing
+# caught: a gauge given a unit ID its instrument doesn't serve couldn't
+# start at all, and one mid-run lost its poll thread. A read now checks
+# isError() and counts as a failed poll (found with the interlock's unit ID,
+# item 7).
+
+
+def test_unit_id_the_gauge_does_not_serve_faults_cleanly(device_factory, fake_hardware):
+    proxy = device_factory(
+        Host="127.0.0.1", Port=fake_hardware["port"], ModbusDeviceId=2
+    )
+    assert proxy.state() == DevState.FAULT
+    assert "exception response" in proxy.status()
+
+
+def test_exception_response_mid_run_faults_then_recovers(device):
+    assert device.state() == DevState.ON
+    refused = ExceptionResponse(3, 4)  # read holding registers, DEVICE FAILURE
+    with patch.object(ModbusTcpClient, "read_holding_registers", return_value=refused):
+        wait_for_state(device, DevState.FAULT, timeout=8.0)
+        assert poll_threads() == 1, "the poll thread died"
+    wait_for_state(device, DevState.ON, timeout=8.0)

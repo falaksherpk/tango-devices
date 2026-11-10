@@ -234,12 +234,14 @@ def test_concurrent_reset_calls_are_serialized(device):
     [
         ({"Port": 0}, "Port must be"),
         ({"Port": 70000}, "Port must be"),
+        ({"ModbusDeviceId": -1}, "ModbusDeviceId must be"),
+        ({"ModbusDeviceId": 248}, "ModbusDeviceId must be"),
     ],
 )
 def test_invalid_properties_fault_at_startup(
     device_factory, bad_properties, expected_in_status
 ):
-    properties = {"Host": "127.0.0.1", "Port": 5040}
+    properties = {"Host": "127.0.0.1", "Port": 5040, "ModbusDeviceId": 1}
     properties.update(bad_properties)
     proxy = device_factory(**properties)
 
@@ -534,3 +536,30 @@ def test_reset_reports_a_failed_write(fake_hardware, device_factory, behaviour, 
     with pytest.raises(DevFailed) as excinfo:
         proxy.Reset()
     assert excinfo.value.args[0].reason == reason
+
+
+# --- The PLC's unit ID, and exception responses to a read (Part 4 Ch38) ---
+#
+# Item 7: the unit ID was fixed at 1 in code; it is a property now, as the
+# vacuum gauge's. Found on the way: pymodbus 3.15's ExceptionResponse has
+# empty .bits, not none, so a read answered with a Modbus exception raised
+# IndexError, which nothing caught: the device couldn't start, or its poll
+# thread died and the last coil values stayed on show. A read now checks
+# isError(), as Reset already did, and counts as a failed poll.
+
+
+def test_unit_id_the_plc_does_not_serve_faults_cleanly(device_factory, fake_hardware):
+    proxy = device_factory(
+        Host="127.0.0.1", Port=fake_hardware["port"], ModbusDeviceId=2
+    )
+    assert proxy.state() == DevState.FAULT
+    assert "exception response" in proxy.status()
+
+
+def test_exception_response_mid_run_faults_then_recovers(device):
+    assert device.state() == DevState.ON
+    refused = ExceptionResponse(1, 4)  # read coils, SERVER DEVICE FAILURE
+    with patch.object(ModbusTcpClient, "read_coils", return_value=refused):
+        wait_for_state(device, DevState.FAULT, timeout=8.0)
+        assert poll_threads() == 1, "the poll thread died"
+    wait_for_state(device, DevState.ON, timeout=8.0)
