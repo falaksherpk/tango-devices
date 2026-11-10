@@ -601,7 +601,7 @@ def restart_simulator(fake_hardware) -> None:
     fake_hardware["proc"] = start_simulator(fake_hardware["port"])
 
 
-def test_one_failed_poll_does_not_overwrite_alarm(device, fake_hardware, capfd):
+def test_one_failed_poll_does_not_overwrite_alarm(device, fake_hardware):
     cfg = device.get_attribute_config_ex("VacuumPressure")[0]
     cfg.alarms.max_alarm = "0.5"
     device.set_attribute_config(cfg)
@@ -609,10 +609,14 @@ def test_one_failed_poll_does_not_overwrite_alarm(device, fake_hardware, capfd):
     assert device.state() == DevState.ALARM
     assert stored_state(device) == DevState.ALARM
 
-    restart_simulator(fake_hardware)  # pressure is back at 1.0: still past 0.5
-    time.sleep(2.5)
-    captured = capfd.readouterr()
-    assert "Poll failed" in captured.out + captured.err
+    # The device's log is recorded in Python, not read from stdout: in the CI
+    # container Tango's console output is buffered until the process exits,
+    # so capfd saw nothing there (pipeline #92).
+    patches, _infos, errors = _recording_streams()
+    with patches:
+        restart_simulator(fake_hardware)  # pressure is back at 1.0: past 0.5
+        time.sleep(2.5)
+    assert any("Poll failed" in m for m in errors), errors
     assert "Lost contact" not in device.status()
     assert stored_state(device) == DevState.ALARM, "one failed poll set ON"
 
