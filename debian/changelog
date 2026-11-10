@@ -1,3 +1,22 @@
+beamline-tango-devices (1.2.0) noble; urgency=medium
+
+  * Faraday cup and magnet: current's change events come from Tango's
+    polling (1000 ms; abs_change 1 pA and 1 mA), not from the devices' own
+    loops. Pushing from the asyncio loop made about 1 % of polled reads fail
+    with API_AttrValueNotSet, archived by HDB++ as error rows (handbook
+    Part 4, Ch38).
+  * Faraday cup: a failed Reconnect is reported in Status, as the camera
+    reports it, instead of raising.
+  * Vacuum gauge: never starts the pump by itself. PumpStatus is memorized
+    but no longer hw_memorized, and a pump that differs from its last
+    command is reported as ALARM. One failed poll no longer overwrites ALARM.
+  * Interlock and vacuum gauge: a Modbus exception response counts as a
+    failed read (it stopped the poll thread). The interlock's unit ID is now
+    the ModbusDeviceId property.
+  * Both packages: postinst runs systemctl daemon-reload.
+
+ -- Falak Sher <45312905+falaksherpk@users.noreply.github.com>  Tue, 10 Nov 2026 14:30:00 +0000
+
 beamline-tango-devices (1.1.0) noble; urgency=medium
 
   * beamline_tango.exporter and tango-exporter@.service: a Prometheus
