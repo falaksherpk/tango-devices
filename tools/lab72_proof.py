@@ -15,10 +15,14 @@ unintended magnet moves.
 
 import sys
 import time
+from pathlib import Path
 
 from sardana import State
 
-sys.path.insert(0, ".")
+# From a checkout the package is in src/ (Part 4 Ch33; it used to need
+# PYTHONPATH=src, Ch38 item 7). On tango-ds the package runtime,
+# /opt/beamline-tango/bin/python3, has it installed already.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from beamline_tango.sardana_controllers.magnet_motor_ctrl import MagnetMotorController
 from beamline_tango.sardana_controllers.faraday_zerod_ctrl import FaradayZeroDController
 

@@ -88,11 +88,16 @@ test-sardana:
   # the Door's events, so the MacroServer's event port must be reachable from
   # the runner too. Required since Ch31: a failure here fails the pipeline.
   script:
-    # test_state_one_fault_handling.py stays manual-only: it kills and
-    # restarts the real faradaycup1 process with local pgrep/subprocess,
-    # which cannot reach tango-ds.beamline from this container. Run it on
-    # tango-ds.beamline itself.
-    - TANGO_HOST=tango-db.beamline:10000 python3 -m pytest tests/sardana/ -v --ignore=tests/sardana/test_state_one_fault_handling.py
+    # test_state_one_fault_handling.py stays manual-only: it stops and
+    # starts the real cup's unit (tango-faradaycup@faradaycup1) with sudo
+    # systemctl, which only tango-ds.beamline itself can do (Ch38). Run it
+    # there; it skips itself anywhere else.
+    - TANGO_HOST=tango-db.beamline:10000 python3 -m pytest tests/sardana/ -v --ignore=tests/sardana/test_state_one_fault_handling.py --junitxml=report-sardana.xml
+  # Published even when the job fails, as test-runner's (Ch38, item 7).
+  artifacts:
+    when: always
+    reports:
+      junit: report-sardana.xml
 
 # On pkg.beamline (shell executor, as gitlab-runner, rootless Podman). Protected refs only:
 # runner #3 takes nothing else, so an unprotected ref would wait for it forever.

@@ -15,14 +15,21 @@ distinguishable. The fix wraps proxy.state()/status() in
 try/except tango.DevFailed, returning State.Fault with a status
 string naming the real reason.
 
-Restart is via a detached background process, polled for real
-recovery (not a fixed sleep) -- if it fails to come back within the
-timeout, this test fails loudly rather than leaving the device
-silently broken for whatever runs next.
+Since Part 4 Ch35 the device runs as the systemd unit
+tango-faradaycup@faradaycup1.service from the installed package, so the
+test stops and starts that unit (Ch38, item 7) instead of killing a
+process found by its old source path and starting a copy by hand, which
+would have run outside systemd, as the wrong user and without the unit's
+hardening. Nothing else stops with it: the Pool only Wants= and After= the
+cup. It runs on tango-ds.beamline only, with passwordless sudo for
+systemctl (or credentials cached by a `sudo -v` just before), and is
+skipped elsewhere; CI never runs it. Recovery is polled, not slept: if the
+cup isn't back ON within the timeout, the test fails loudly rather than
+leaving the device down for whatever runs next.
 """
 
+import socket
 import subprocess
-import sys
 import time
 
 import pytest
@@ -32,21 +39,13 @@ from sardana import State
 from beamline_tango.sardana_controllers.faraday_zerod_ctrl import FaradayZeroDController
 
 DEVICE_NAME = "linac/beam/faradaycup1"
-DEVICE_SCRIPT = "src/beamline_tango/devices/faraday_cup.py"
-DEVICE_INSTANCE = "faradaycup1"
+UNIT = "tango-faradaycup@faradaycup1.service"
 
 
-def find_real_pid():
-    result = subprocess.run(
-        ["pgrep", "-f", f"{DEVICE_SCRIPT} {DEVICE_INSTANCE}"],
-        capture_output=True,
-        text=True,
+def systemctl(*args):
+    return subprocess.run(
+        ["sudo", "-n", "systemctl", *args], capture_output=True, text=True
     )
-    pids = [int(p) for p in result.stdout.split()]
-    assert len(pids) == 1, (
-        f"expected exactly one running {DEVICE_INSTANCE} process, found {pids}"
-    )
-    return pids[0]
 
 
 def wait_for_device_state(expected_reachable, timeout=15):
@@ -69,19 +68,21 @@ def wait_for_device_state(expected_reachable, timeout=15):
 
 
 @pytest.fixture
-def killed_and_restarted_faraday_cup():
-    pid = find_real_pid()
-    subprocess.run(["kill", str(pid)], check=True)
+def stopped_and_restarted_faraday_cup():
+    if not socket.gethostname().startswith("tango-ds"):
+        pytest.skip("manual test: run it on tango-ds.beamline")
+    if subprocess.run(["sudo", "-n", "true"], capture_output=True).returncode:
+        pytest.skip("needs sudo for systemctl: run `sudo -v` first")
+    active = systemctl("is-active", UNIT).stdout.strip()
+    assert active == "active", f"{UNIT} is {active!r} before the test"
+    stopped = systemctl("stop", UNIT)
+    assert stopped.returncode == 0, stopped.stderr
     wait_for_device_state(expected_reachable=False)
 
     yield
 
-    subprocess.Popen(
-        [sys.executable, "-u", DEVICE_SCRIPT, DEVICE_INSTANCE],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        start_new_session=True,
-    )
+    started = systemctl("start", UNIT)
+    assert started.returncode == 0, started.stderr
     wait_for_device_state(expected_reachable=True, timeout=20)
 
     # Confirm it's not just reachable but genuinely healthy again.
@@ -98,7 +99,7 @@ def killed_and_restarted_faraday_cup():
 
 
 def test_state_one_returns_fault_when_device_unreachable(
-    killed_and_restarted_faraday_cup,  # noqa: ARG001
+    stopped_and_restarted_faraday_cup,  # noqa: ARG001
 ):
     ctrl = FaradayZeroDController("test_inst", {"TangoDevice": DEVICE_NAME})
     ctrl.AddDevice(1)  # must not raise, even though the device is gone
