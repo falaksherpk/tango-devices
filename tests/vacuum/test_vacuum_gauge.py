@@ -566,3 +566,92 @@ def test_startup_recovery_names_the_failed_first_read(device_factory):
     assert restored, f"no recovery message; infos={infos} errors={errors}"
     assert all("after a failed first read" in m for m in restored), restored
     assert not any("after 0 failed polls" in m for m in restored), restored
+
+
+# --- The stored state, and the pump after a restart (Part 4 Ch38) ----
+#
+# Item 4: after a single failed poll (below the FAULT threshold) the
+# recovery branch set ON, over an ALARM a past-the-level pressure had put
+# the device in. Item 5 (owner's decision, option 3): the device never
+# starts the pump by itself. PumpStatus is memorized but not hw_memorized,
+# and a pump that differs from its last command is reported as ALARM until
+# an operator acts.
+
+
+def write_pump_register(port: int, value: int) -> None:
+    """Switch the pump at the instrument, behind the device's back."""
+    client = ModbusTcpClient("127.0.0.1", port=port)
+    try:
+        client.connect()
+        client.write_register(1, value, device_id=1)
+    finally:
+        client.close()
+
+
+def stored_state(proxy):
+    # The state the device itself holds, read without Tango re-evaluating
+    # attribute alarms (as a client's State read does). process=False: the
+    # server runs in this process.
+    return tango.Util.instance().get_device_by_name(proxy.dev_name()).get_state()
+
+
+def restart_simulator(fake_hardware) -> None:
+    stop_proc(fake_hardware["proc"])
+    time.sleep(1.1)  # one poll fails; the FAULT threshold is three
+    fake_hardware["proc"] = start_simulator(fake_hardware["port"])
+
+
+def test_one_failed_poll_does_not_overwrite_alarm(device, fake_hardware, capfd):
+    cfg = device.get_attribute_config_ex("VacuumPressure")[0]
+    cfg.alarms.max_alarm = "0.5"
+    device.set_attribute_config(cfg)
+    time.sleep(1.5)
+    assert device.state() == DevState.ALARM
+    assert stored_state(device) == DevState.ALARM
+
+    restart_simulator(fake_hardware)  # pressure is back at 1.0: still past 0.5
+    time.sleep(2.5)
+    captured = capfd.readouterr()
+    assert "Poll failed" in captured.out + captured.err
+    assert "Lost contact" not in device.status()
+    assert stored_state(device) == DevState.ALARM, "one failed poll set ON"
+
+
+def test_init_does_not_start_the_pump(device, fake_hardware):
+    device.PumpStatus = True  # memorized: hw_memorized restored this at Init
+    write_pump_register(fake_hardware["port"], 0)  # the pump stops
+    device.Init()
+    time.sleep(1.5)
+    assert device.PumpStatus is False
+    assert device.state() == DevState.ALARM
+    assert "last command was ON" in device.status()
+
+
+def test_pump_off_after_instrument_restart_is_reported_until_pump_on(
+    device, fake_hardware
+):
+    device.PumpOn()
+    restart_simulator(fake_hardware)  # comes back with the pump off
+    wait_for_state(device, DevState.ALARM, timeout=10.0)
+    assert "last command was ON" in device.status()
+    assert device.PumpStatus is False
+
+    device.PumpOn()
+    assert device.state() == DevState.ON
+    assert "last command" not in device.status()
+
+
+def test_pump_on_at_the_instrument_is_reported_until_pump_off(device, fake_hardware):
+    device.PumpOff()
+    write_pump_register(fake_hardware["port"], 1)
+    wait_for_state(device, DevState.ALARM, timeout=5.0)
+    assert "last command was OFF" in device.status()
+
+    device.PumpOff()
+    assert device.state() == DevState.ON
+
+
+def test_pump_never_commanded_is_not_reported(device, fake_hardware):
+    write_pump_register(fake_hardware["port"], 1)
+    time.sleep(2.5)
+    assert device.state() == DevState.ON

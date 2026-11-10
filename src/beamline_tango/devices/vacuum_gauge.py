@@ -31,19 +31,23 @@ Lifetime (Ch27): delete_device() stops and joins the poll thread and
 closes the Modbus connection. Init and server shutdown both call it, so
 Init leaves exactly one poll thread and one connection.
 
-PumpStatus is memorized (hw_memorized). When the instrument answers at
-startup, Tango writes the last value back, so a restart restarts the
-pump. When it doesn't, the device is in FAULT and Tango refuses the
-restore, and remembers that (observed live in Ch27): once the device
-has recovered, clients see ALARM with "Memorized attribute PumpStatus
-has failed during device startup sequence", and reads of PumpStatus
-return the refused write's error, while VacuumPressure is served. A
-write of PumpStatus clears it (False keeps the pump off); Init with the
-instrument up runs the restore again, which starts the pump if the
-stored value is true. PumpOn and PumpOff memorize their result as a
-write of the attribute does, so a restart restores the last command,
-however it was given. Until Ch32 they didn't: PumpStatus = True, then
-PumpOff, then a restart, and the pump ran again.
+PumpStatus is memorized but not hw_memorized (Part 4 Ch38, owner's
+decision): the device never switches the pump by itself, at startup,
+after Init, or when the instrument comes back after a restart. The last
+command (a write of PumpStatus, PumpOn or PumpOff) is kept as the
+memorized value in the database, and every poll reads the pump's actual
+state with the pressure. When the two differ, State is ALARM and Status
+says which way and what to do; it clears when they agree again. Tango's
+own write value can't serve as the last command: a never-written
+PumpStatus reads True, so the memorized property is read instead, and a
+device that never had a command checks nothing. Until Ch38 PumpStatus was
+hw_memorized, so a restart started the pump, while an instrument restart
+left it off with nothing reported.
+
+Recovery (Ch38): a good poll after failed ones resets the count, but
+only a device in FAULT goes back to ON. After one or two failed polls
+the device never left its state, and setting ON there overwrote an ALARM
+from a pressure past its level.
 """
 
 import threading
@@ -95,6 +99,9 @@ class VacuumGauge(Device):
         self.set_status(StatusNotSet)
         self._client_lock = threading.Lock()
         self._pressure = None
+        self._pump = None  # the pump's actual state, from the last poll
+        self._pump_command = self._load_pump_command()
+        self._reported_pump_mismatch = ""
         self._last_pushed_pressure = None
         self._poll_failures = 0
         self._client = None
@@ -123,7 +130,7 @@ class VacuumGauge(Device):
         # before init_device() returns (and before Tango restores the
         # memorized PumpStatus), or FAULT with the reason.
         try:
-            self._pressure = self._read_pressure()
+            self._pressure, self._pump = self._read_instrument()
             self.set_state(DevState.ON)
         except (ModbusException, OSError, AttributeError) as e:
             self._drop_connection()
@@ -163,19 +170,20 @@ class VacuumGauge(Device):
             self._drop_connection()
             raise
 
-    def _read_pressure(self):
+    def _read_instrument(self):
+        """Pressure (mbar) and pump state, in one Modbus call."""
         with self._client_lock:
             result = self._client.read_holding_registers(
-                address=0, count=1, device_id=self.ModbusDeviceId
+                address=0, count=2, device_id=self.ModbusDeviceId
             )
         # A Modbus exception response has no .registers: AttributeError
         # is caught by the callers like a failed read.
-        return result.registers[0] / 1000.0
+        return result.registers[0] / 1000.0, bool(result.registers[1])
 
     def _poll_loop(self):
         while not self._stop_event.wait(POLL_INTERVAL_S):
             try:
-                pressure = self._read_pressure()
+                pressure, pump = self._read_instrument()
             except (ModbusException, OSError, AttributeError) as e:
                 if self._stop_event.is_set():
                     return
@@ -196,14 +204,13 @@ class VacuumGauge(Device):
             if self._stop_event.is_set():
                 return
 
-            # A good read clears the failure streak and, if the device
-            # was faulted (at startup or later), brings it back to ON.
+            # A good read clears the failure streak; only a device in FAULT
+            # (at startup or later) goes back to ON. Below the threshold the
+            # device never left its state, which may be ALARM from a pressure
+            # past its level: setting ON there overwrote it (Ch38, item 4).
             # Recovery is good news: INFO, not ERROR (as the interlock, Ch28).
-            # Recovery means from FAULT, not from any state but ON: a client's
-            # State read can leave the device in ALARM (an attribute past its
-            # level), and treating that as a lost link flipped the state back
-            # to ON every second with a false "contact restored" (Ch32, 31 Oct).
-            if self._poll_failures or self.get_state() == DevState.FAULT:
+            faulted = self.get_state() == DevState.FAULT
+            if self._poll_failures or faulted:
                 after = (
                     f"{self._poll_failures} failed polls"
                     if self._poll_failures
@@ -211,10 +218,13 @@ class VacuumGauge(Device):
                 )
                 self.info_stream(f"Modbus contact restored after {after}")
                 self._poll_failures = 0
+            if faulted:
                 self.set_state(DevState.ON)
                 self.set_status(StatusNotSet)
 
             self._pressure = pressure
+            self._pump = pump
+            self._log_pump_mismatch()
 
             if (
                 self._last_pushed_pressure is None
@@ -223,6 +233,71 @@ class VacuumGauge(Device):
             ):
                 self.push_change_event("VacuumPressure", pressure)
                 self._last_pushed_pressure = pressure
+
+    # --- The pump against its last command (Ch38, item 5) -----------------
+
+    def _load_pump_command(self):
+        """The last pump command: the memorized value in the database, or
+        None if there has never been one."""
+        try:
+            prop = (
+                Util.instance()
+                .get_database()
+                .get_device_attribute_property(self.get_name(), ["PumpStatus"])[
+                    "PumpStatus"
+                ]
+            )
+        except DevFailed as exc:
+            self.warn_stream(f"Last pump command unknown, not checked: {exc}")
+            return None
+        value = prop.get("__value")
+        return value[0].lower() == "true" if value else None
+
+    def _commanded(self, value):
+        # Called after the register write succeeded: the pump is as commanded
+        # now, so there is nothing to report until the next poll says otherwise.
+        self._pump_command = bool(value)
+        self._pump = bool(value)
+        self._log_pump_mismatch()
+
+    def _pump_mismatch(self):
+        command, actual = self._pump_command, self._pump
+        if command is None or actual is None or command == actual:
+            return ""
+        if command:
+            return (
+                "Pump is off, but its last command was ON (did the gauge "
+                "restart?). PumpOn restarts it; PumpOff accepts it off."
+            )
+        return (
+            "Pump is on, but its last command was OFF (switched on at the "
+            "controller?). PumpOff stops it; PumpOn accepts it on."
+        )
+
+    def _log_pump_mismatch(self):
+        mismatch = self._pump_mismatch()
+        if mismatch == self._reported_pump_mismatch:
+            return
+        if mismatch:
+            self.warn_stream(mismatch)
+        else:
+            self.info_stream("Pump agrees with its last command again")
+        self._reported_pump_mismatch = mismatch
+
+    def dev_state(self):
+        # Tango's own evaluation (FAULT as set, ALARM for an attribute past
+        # its level), plus the pump. Nothing is stored: when the pump agrees
+        # again, the next State read is ON with no state to undo.
+        state = super().dev_state()
+        if state in (DevState.ON, DevState.ALARM) and self._pump_mismatch():
+            return DevState.ALARM
+        return state
+
+    def dev_status(self):
+        mismatch = self._pump_mismatch()
+        if mismatch and self.get_state() != DevState.FAULT:
+            return mismatch
+        return super().dev_status()
 
     def _is_operational(self):
         # ALARM included, as in the interlock (Ch28): with VacuumPressure past an
@@ -248,7 +323,6 @@ class VacuumGauge(Device):
         label="Pump Status",
         access=AttrWriteType.READ_WRITE,
         memorized=True,
-        hw_memorized=True,
     )
     def PumpStatus(self):
         result = self._call(self._client.read_holding_registers, address=1, count=1)
@@ -257,6 +331,7 @@ class VacuumGauge(Device):
     @PumpStatus.setter
     def PumpStatus(self, value):
         self._call(self._client.write_register, address=1, value=int(value))
+        self._commanded(value)
 
     def is_PumpStatus_allowed(self, _req_type):
         return self._is_operational()
@@ -264,6 +339,7 @@ class VacuumGauge(Device):
     @command(dtype_out=str)
     def PumpOn(self):
         self._call(self._client.write_register, address=1, value=1)
+        self._commanded(True)
         self._memorize_pump_status(True)
         return "Pump turned ON"
 
@@ -273,6 +349,7 @@ class VacuumGauge(Device):
     @command(dtype_out=str)
     def PumpOff(self):
         self._call(self._client.write_register, address=1, value=0)
+        self._commanded(False)
         self._memorize_pump_status(False)
         return "Pump turned OFF"
 
