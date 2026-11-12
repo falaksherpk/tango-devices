@@ -48,15 +48,36 @@ Recovery (Ch38): a good poll after failed ones resets the count, but
 only a device in FAULT goes back to ON. After one or two failed polls
 the device never left its state, and setting ON there overwrote an ALARM
 from a pressure past its level.
+
+State and the pressure levels (Ch41, Ch39 Case 6): each meaningful
+change, the poll thread pushes a change event with the bare value, which
+leaves VacuumPressure's stored quality ATTR_VALID. When the attribute is
+polled, as HDB++ polls it on the fleet, cppTango's default dev_state()
+uses that stored quality instead of checking the levels, so State read
+ON while the pressure was past them. dev_state() now compares the cached
+pressure with the configured levels itself, with Tango's own rule: a
+value at a level counts as past it, and a warning level makes State
+ALARM too. The events themselves carry the right quality.
 """
 
+import operator
 import threading
 
 from pymodbus.client import ModbusTcpClient
 from pymodbus.exceptions import ModbusException
 from tango import AttrWriteType, DevFailed, DevState, Except, Util
-from tango.constants import StatusNotSet
+from tango.constants import AlrmValueNotSpec, StatusNotSet
 from tango.server import Device, attribute, command, device_property, run
+
+# VacuumPressure's levels, alarms first, each with Tango's own test of a
+# value past it (measured with cppTango 10.3.3, Ch41: a value at the level
+# counts). The site sets the levels in the Tango database (tango_ds role).
+PRESSURE_LEVELS = (
+    ("min_alarm", operator.le),
+    ("max_alarm", operator.ge),
+    ("min_warning", operator.le),
+    ("max_warning", operator.ge),
+)
 
 # How much VacuumPressure must change (in mbar) before a change event is
 # pushed. Without it the poll loop would push an event every second even
@@ -294,19 +315,47 @@ class VacuumGauge(Device):
             self.info_stream("Pump agrees with its last command again")
         self._reported_pump_mismatch = mismatch
 
+    def _pressure_past_level(self):
+        """The first level the cached pressure is at or past, as (name,
+        level, pressure), or None. Levels not set are skipped; Tango accepts only
+        numbers for a level, so a set one always parses."""
+        pressure = self._pressure
+        if pressure is None:
+            return None
+        props = (
+            self.get_device_attr().get_attr_by_name("VacuumPressure").get_properties()
+        )
+        for name, is_past in PRESSURE_LEVELS:
+            text = getattr(props, name)
+            if text != AlrmValueNotSpec and is_past(pressure, float(text)):
+                return name, float(text), pressure
+        return None
+
     def dev_state(self):
         # Tango's own evaluation (FAULT as set, ALARM for an attribute past
-        # its level), plus the pump. Nothing is stored: when the pump agrees
-        # again, the next State read is ON with no state to undo.
+        # its level), plus the pump and the pressure against its levels,
+        # which Tango misses when VacuumPressure is polled (Ch41). Nothing is
+        # stored: when both are fine again, the next State read is ON with
+        # no state to undo.
         state = super().dev_state()
-        if state in (DevState.ON, DevState.ALARM) and self._pump_mismatch():
+        if state in (DevState.ON, DevState.ALARM) and (
+            self._pump_mismatch() or self._pressure_past_level()
+        ):
             return DevState.ALARM
         return state
 
     def dev_status(self):
-        mismatch = self._pump_mismatch()
-        if mismatch and self.get_state() != DevState.FAULT:
-            return mismatch
+        if self.get_state() != DevState.FAULT:
+            mismatch = self._pump_mismatch()
+            if mismatch:
+                return mismatch
+            past = self._pressure_past_level()
+            if past:
+                name, level, pressure = past
+                return (
+                    f"VacuumPressure {pressure:.2e} mbar is at or past "
+                    f"its {name.replace('_', ' ')} level ({level:.2e} mbar)."
+                )
         return super().dev_status()
 
     def _is_operational(self):

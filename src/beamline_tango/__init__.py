@@ -1,3 +1,3 @@
 """Tango device servers, protocol simulators and Sardana controllers of the lab."""
 
-__version__ = "1.2.0"
+__version__ = "1.2.1"

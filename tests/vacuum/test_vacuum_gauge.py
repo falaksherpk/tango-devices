@@ -179,6 +179,53 @@ def test_operator_can_act_while_pressure_alarms(device, capfd):
     assert "contact restored" not in captured.out + captured.err
 
 
+def _states_during(device, t0, start, end, period=0.1):
+    """Read State every `period` s from t0+start to t0+end; return the reads."""
+    while time.time() < t0 + start:
+        time.sleep(0.02)
+    reads = []
+    while time.time() < t0 + end:
+        reads.append((round(time.time() - t0, 2), device.state()))
+        time.sleep(period)
+    return reads
+
+
+def test_state_follows_polled_pressure_alarm_and_warning(device):
+    # Ch41 (Ch39 Case 6): on the fleet, HDB++ polls VacuumPressure and State
+    # at 1000 ms. cppTango's default dev_state() then skips the polled
+    # attribute's own alarm check, so State read ON on 1-2 of 7 reads while
+    # the pressure was past max_alarm (Ch38 S28). The levels are set at
+    # runtime, as the site sets them in the Tango database. The windows stay
+    # clear of both thresholds (the device's pressure lags by up to 1 s).
+    cfg = device.get_attribute_config_ex("VacuumPressure")[0]
+    cfg.alarms.max_alarm = "0.5"
+    cfg.alarms.max_warning = "0.1"
+    device.set_attribute_config(cfg)
+    device.poll_attribute("VacuumPressure", 1000)
+    device.poll_attribute("State", 1000)
+    time.sleep(1.5)
+
+    device.PumpOn()  # 0.05 mbar/s from 1.0: past 0.5 for ~10 s, past 0.1 for ~18 s
+    t0 = time.time()
+    in_alarm = _states_during(device, t0, 0.5, 6.0)  # about 1.0 -> 0.7 mbar
+    status_in_alarm = device.status()
+    in_warning = _states_during(device, t0, 12.5, 16.0)  # about 0.4 -> 0.2 mbar
+    wrong = [r for r in in_alarm + in_warning if r[1] != DevState.ALARM]
+    assert not wrong, (
+        f"{len(wrong)} of {len(in_alarm) + len(in_warning)} State reads were not "
+        f"ALARM while the pressure was past a level: {wrong[:5]}"
+    )
+    assert "VacuumPressure" in status_in_alarm, status_in_alarm
+
+    deadline = t0 + 25  # the simulator's floor is 0.01 mbar, from about t+20 s
+    while time.time() < deadline and device.VacuumPressure >= 0.1:
+        time.sleep(0.5)
+    assert device.VacuumPressure < 0.1
+    time.sleep(1.5)
+    below = _states_during(device, time.time(), 0.0, 2.0)
+    assert all(state == DevState.ON for _, state in below), below
+
+
 def test_pressure_decays_from_actual_current_state(device):
     """Regression test for the single most important historical bug
     this device carries forward (Phase 2 Lab 2.3): pressure must decay

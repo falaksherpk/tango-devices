@@ -1,3 +1,15 @@
+beamline-tango-devices (1.2.1) noble; urgency=medium
+
+  * Vacuum gauge: State is ALARM whenever VacuumPressure is at or past one
+    of its configured alarm or warning levels, also when the attribute is
+    polled (HDB++ polls it at 1000 ms). The gauge's change events left the
+    attribute's stored quality ATTR_VALID, and Tango's default State
+    trusted it for a polled attribute, so State read ON on most reads
+    while the pump brought the pressure down. Status names the pressure
+    and the level (handbook Part 4, Ch39 Case 6, Ch41).
+
+ -- Falak Sher <45312905+falaksherpk@users.noreply.github.com>  Thu, 12 Nov 2026 12:30:00 +0000
+
 beamline-tango-devices (1.2.0) noble; urgency=medium
 
   * Faraday cup and magnet: current's change events come from Tango's
