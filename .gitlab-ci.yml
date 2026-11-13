@@ -131,8 +131,8 @@ build-deb:
 install-test:
   extends: .pkg
   stage: verify
-  # About 7 min (Ch42: 6:43); the same suites as test-runner, the same bound (Part 4 Ch43).
-  timeout: 20m
+  # 6:43 in Ch42, 14:51 in Ch43: its fresh container's apt downloads vary (Part 4 Ch43).
+  timeout: 40m
   needs:
     - build-deb
   script:
