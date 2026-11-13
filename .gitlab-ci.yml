@@ -48,6 +48,8 @@ version-check:
 
 test-runner:
   stage: test
+  # About 6 min (Ch42: 5:51, 6:06); a hang ends here, not at GitLab's 1 h (Part 4 Ch43).
+  timeout: 20m
   tags:
     - tango-ci
   image: gitlab.beamline:5050/beamline/tango-devices/tango-ci:e8ba99b@sha256:4242ac14dea648bf91354532fdf44f9dc265ce55e658bc86bc0b5e63143431ff
@@ -60,9 +62,11 @@ test-runner:
     # servers' crash traces never failed a test, so they used to pass
     # unnoticed (handbook Part 3, Ch26). pytest's status is kept in a file,
     # because a pipe would report tee's. The JUnit report feeds the
-    # pipeline's Tests tab (Ch29).
+    # pipeline's Tests tab (Ch29). tests/harness/ checks tests/tango_context.py, the
+    # test contexts every process=True suite uses: a failed device-server start leaves no
+    # server, which had kept pytest from exiting until GitLab's 1 h timeout (Part 4 Ch43).
     - |
-      { python3 -m pytest tests/vacuum/ tests/safety/ tests/magnet/ tests/camera/ tests/beam/ tests/exporter/ -v --junitxml=report.xml && rc=0 || rc=$?; echo "$rc" > pytest.rc; } 2>&1 | tee pytest.log
+      { python3 -m pytest tests/vacuum/ tests/safety/ tests/magnet/ tests/camera/ tests/beam/ tests/exporter/ tests/harness/ -v --junitxml=report.xml && rc=0 || rc=$?; echo "$rc" > pytest.rc; } 2>&1 | tee pytest.log
       rc=$(cat pytest.rc)
       if grep -n "Fatal Python error" pytest.log; then
         echo "test-runner: crash trace(s) in the log above (pytest exit $rc)"
@@ -127,6 +131,8 @@ build-deb:
 install-test:
   extends: .pkg
   stage: verify
+  # About 7 min (Ch42: 6:43); the same suites as test-runner, the same bound (Part 4 Ch43).
+  timeout: 20m
   needs:
     - build-deb
   script:

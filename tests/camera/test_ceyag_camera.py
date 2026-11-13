@@ -32,7 +32,7 @@ from unittest.mock import patch
 import numpy as np
 import pytest
 from tango import DevState, EventSubMode, EventType
-from tango.test_context import DeviceTestContext
+from tango_context import DeviceTestContext
 
 from beamline_tango.devices import ceyag_camera
 

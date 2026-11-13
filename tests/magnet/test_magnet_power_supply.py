@@ -22,7 +22,7 @@ import pytest
 import serial
 import tango
 from tango import AttrQuality, DevFailed, DevState
-from tango.test_context import DeviceTestContext
+from tango_context import DeviceTestContext
 
 from beamline_tango.devices import magnet_power_supply
 

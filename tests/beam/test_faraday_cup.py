@@ -46,7 +46,7 @@ from pathlib import Path
 import pytest
 import tango
 from tango import DevState
-from tango.test_context import DeviceTestContext
+from tango_context import DeviceTestContext
 
 from beamline_tango import simulators
 from beamline_tango.devices import faraday_cup

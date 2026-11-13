@@ -23,7 +23,7 @@ import tango
 from prometheus_client.parser import text_string_to_metric_families
 from tango import DevState
 from tango.server import Device, attribute, command
-from tango.test_context import MultiDeviceTestContext
+from tango_context import MultiDeviceTestContext
 
 from beamline_tango import exporter
 

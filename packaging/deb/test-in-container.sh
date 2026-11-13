@@ -37,10 +37,13 @@ DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends py
 python3.12 -m venv /tmp/fetch
 /tmp/fetch/bin/python3 -m pip --disable-pip-version-check --no-cache-dir install --quiet \
   --target /tmp/testdeps --no-deps --require-hashes --only-binary :all: -r /test/requirements/test.txt
+# /test/tests is on the path for tests/tango_context.py, the fail-fast test contexts (Part 4
+# Ch43): pyproject.toml, which puts it there in CI, is not copied into this container.
 cd /test
 rc=0
-PYTHONPATH=/tmp/testdeps /opt/beamline-tango/bin/python3 -m pytest -p no:cacheprovider \
-  tests/vacuum/ tests/safety/ tests/magnet/ tests/camera/ tests/beam/ tests/exporter/ 2>&1 | tee /tmp/pytest.log || rc=$?
+PYTHONPATH=/tmp/testdeps:/test/tests /opt/beamline-tango/bin/python3 -m pytest -p no:cacheprovider \
+  tests/vacuum/ tests/safety/ tests/magnet/ tests/camera/ tests/beam/ tests/exporter/ tests/harness/ \
+  2>&1 | tee /tmp/pytest.log || rc=$?
 if grep -n "Fatal Python error" /tmp/pytest.log; then
   echo "test-in-container: crash trace(s) in the log above (pytest exit $rc)"
   exit 1
