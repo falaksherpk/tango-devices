@@ -734,3 +734,49 @@ def test_exception_response_mid_run_faults_then_recovers(device):
         wait_for_state(device, DevState.FAULT, timeout=8.0)
         assert poll_threads() == 1, "the poll thread died"
     wait_for_state(device, DevState.ON, timeout=8.0)
+
+
+# --- Poll age (Part 4 Ch42, Ch39 Case 2) -------------------------------
+# State alone can't show a poll loop that stopped: the device keeps its last
+# state. PollAge, the seconds since the last good read of the instrument,
+# grows when the loop stops for any reason, and is readable in every state.
+
+POLL_AGE_FRESH_S = 2.5  # one 1 s poll interval, one 1 s Modbus timeout, margin
+
+
+def test_poll_age_stays_fresh_while_polling(device):
+    # Past the limit first: only the loop's own reads keep it fresh, not
+    # the start (an ablation without the loop's update passed otherwise).
+    time.sleep(POLL_AGE_FRESH_S)
+    for _ in range(4):
+        age = device.PollAge
+        assert 0.0 <= age < POLL_AGE_FRESH_S, f"PollAge {age} s while polling"
+        time.sleep(0.7)
+
+
+def test_poll_age_grows_in_fault_and_resets_on_recovery(device, fake_hardware):
+    stop_proc(fake_hardware["proc"])
+    wait_for_state(device, DevState.FAULT)
+    first = device.PollAge  # readable in FAULT, unlike VacuumPressure
+    time.sleep(1.5)
+    assert device.PollAge >= first + 1.0, "PollAge did not grow without polls"
+    assert first >= 3.0, f"PollAge {first} s after three failed polls"
+
+    fake_hardware["proc"] = start_simulator(fake_hardware["port"])
+    wait_for_state(device, DevState.ON)
+    assert device.PollAge < POLL_AGE_FRESH_S
+
+
+def test_poll_age_shows_a_dead_poll_thread_that_state_hides(device):
+    """Ch39 Case 2's shape: an exception nothing catches ends the poll
+    thread, and the device stays ON with its last values."""
+    with patch.object(
+        vacuum_gauge.VacuumGauge, "_read_instrument", side_effect=RuntimeError("boom")
+    ):
+        deadline = time.time() + 5
+        while time.time() < deadline and poll_threads():
+            time.sleep(0.1)
+    assert poll_threads() == 0, "the poll thread is still alive"
+    assert device.state() == DevState.ON, "State noticed; the test needs it not to"
+    time.sleep(POLL_AGE_FRESH_S)
+    assert device.PollAge > POLL_AGE_FRESH_S

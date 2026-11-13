@@ -33,6 +33,7 @@ connection. The device has no memorized attributes.
 """
 
 import threading
+import time
 
 import tango
 from pymodbus.client import ModbusTcpClient
@@ -81,6 +82,8 @@ class InterlockMonitor(Device):
         self.set_status(StatusNotSet)
         self._client_lock = threading.Lock()
         self._poll_failures = 0
+        # time.monotonic() of the last good read; the start until the first.
+        self._last_good_read = time.monotonic()
         self._cache = None
         self._client = None
         self._thread = None
@@ -108,6 +111,7 @@ class InterlockMonitor(Device):
         # reason -- never UNKNOWN serving defaults (Ch6 Finding A).
         try:
             self._cache = self._read_coils()
+            self._last_good_read = time.monotonic()
             self._apply_state_from_cache()
         except (ModbusException, OSError, AttributeError) as e:
             self._drop_connection()
@@ -210,12 +214,21 @@ class InterlockMonitor(Device):
                 self._poll_failures = 0
 
             self._cache = cache
+            self._last_good_read = time.monotonic()
             self._apply_state_from_cache()
 
     def _is_operational(self):
         # ALARM is a healthy state here (comms fine, interlock tripped):
         # the coils are served and Reset must be allowed in it.
         return self.get_state() in (DevState.ON, DevState.ALARM)
+
+    @attribute(dtype=float, label="Poll Age", unit="s", format="%.1f")
+    def PollAge(self):
+        # Seconds since the last good read of the PLC (or since the start,
+        # before the first one); no is_PollAge_allowed, so it reads in every
+        # state. State can't show a poll thread that stopped: the device keeps
+        # its last state, a frozen permit display (Part 4 Ch42, Ch39 Case 2).
+        return time.monotonic() - self._last_good_read
 
     @attribute(dtype=bool, label="Beam Permit")
     def BeamPermit(self):

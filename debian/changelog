@@ -1,3 +1,15 @@
+beamline-tango-devices (1.2.2) noble; urgency=medium
+
+  * Vacuum gauge, interlock, Faraday cup: a new read-only attribute, the
+    seconds since the poll loop's last good read of the instrument
+    (PollAge on the gauge and interlock, poll_age on the cup), readable in
+    every state, FAULT included. State alone can't show a poll loop that
+    stopped: the device keeps its last state, and the interlock its last
+    permit. The age grows whenever polling stops, for any reason
+    (handbook Part 4, Ch39 Case 2, Ch42).
+
+ -- Falak Sher <45312905+falaksherpk@users.noreply.github.com>  Fri, 13 Nov 2026 04:00:00 +0000
+
 beamline-tango-devices (1.2.1) noble; urgency=medium
 
   * Vacuum gauge: State is ALARM whenever VacuumPressure is at or past one

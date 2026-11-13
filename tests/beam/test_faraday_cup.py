@@ -453,3 +453,41 @@ def test_polled_reads_of_current_never_fail(fake_hardware):
     assert failed == [], (
         f"{len(failed)} of {len(seen)} polled reads failed: {failed[:3]}"
     )
+
+
+# --- Poll age (Part 4 Ch42, Ch39 Case 2) -------------------------------
+# poll_age: the seconds since the poll loop's last good read, readable in every
+# state. It grows whenever the loop stops reading, which State alone can't show.
+
+POLL_AGE_FRESH_S = 1.5  # the fixture polls every 100 ms; a read times out at 1 s
+
+
+def test_poll_age_stays_fresh_while_polling(device):
+    # Past the limit first: only the loop's own reads keep it fresh, not
+    # the start (an ablation without the loop's update passed otherwise).
+    time.sleep(POLL_AGE_FRESH_S)
+    for _ in range(4):
+        age = device.poll_age
+        assert 0.0 <= age < POLL_AGE_FRESH_S, f"poll_age {age} s while polling"
+        time.sleep(0.5)
+
+
+def test_poll_age_grows_in_fault_and_resets_on_recovery(device, fake_hardware):
+    stop_proc(fake_hardware["adapter_proc"])
+    deadline = time.time() + 5
+    while time.time() < deadline and device.state() != DevState.FAULT:
+        time.sleep(0.05)
+    assert device.state() == DevState.FAULT
+    first = device.poll_age
+    time.sleep(1.5)
+    assert device.poll_age >= first + 1.0, "poll_age did not grow without reads"
+
+    fake_hardware["adapter_proc"] = start_adapter(
+        fake_hardware["adapter_port"], fake_hardware["pico_port"]
+    )
+    deadline = time.time() + 10
+    while time.time() < deadline and device.state() != DevState.ON:
+        time.sleep(0.05)
+    assert device.state() == DevState.ON
+    time.sleep(0.3)
+    assert device.poll_age < POLL_AGE_FRESH_S

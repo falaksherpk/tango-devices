@@ -36,6 +36,7 @@ Design notes:
 import asyncio
 import contextlib
 import logging
+import time
 
 from tango import AttReqType, DevState, GreenMode
 from tango.server import Device, attribute, command, device_property, run
@@ -65,6 +66,9 @@ class FaradayCup(Device):
         self._link_lock = asyncio.Lock()
         self._zero_check = False
         self._poll_count = 0
+        # time.monotonic() of the poll loop's last good read; the start until
+        # the first.
+        self._last_good_read = time.monotonic()
         self.set_state(DevState.INIT)
         self.set_status("Initialising")
         # Tango detects current's changes from polling (Ch38).
@@ -187,6 +191,7 @@ class FaradayCup(Device):
                     # value reaches clients through polling (Ch38).
                     await self._read_current()
                     self._poll_count += 1
+                    self._last_good_read = time.monotonic()
                     if self.get_state() != DevState.ON:
                         self.set_state(DevState.ON)
                         self.set_status("Connected, polling")
@@ -231,6 +236,14 @@ class FaradayCup(Device):
     @attribute(dtype=int, label="Poll Count")
     async def poll_count(self):
         return self._poll_count
+
+    @attribute(dtype=float, label="Poll Age", unit="s", format="%.1f")
+    async def poll_age(self):
+        # Seconds since the poll loop's last good read (or since the start,
+        # before the first one), readable in every state: it grows whenever the
+        # loop stops reading, which State alone can't show (Part 4 Ch42, Ch39
+        # Case 2). A client's read of current doesn't count; only the loop's.
+        return time.monotonic() - self._last_good_read
 
     @attribute(dtype=bool, label="Zero Check")
     async def zero_check(self):

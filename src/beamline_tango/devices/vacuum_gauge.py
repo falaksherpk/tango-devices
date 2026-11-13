@@ -58,10 +58,17 @@ ON while the pressure was past them. dev_state() now compares the cached
 pressure with the configured levels itself, with Tango's own rule: a
 value at a level counts as past it, and a warning level makes State
 ALARM too. The events themselves carry the right quality.
+
+Poll age (Part 4 Ch42, Ch39 Case 2): State can't show a poll thread that
+stopped, since the device keeps its last state. PollAge is the time since
+the last good read of the instrument (or since the device started, before
+the first one), readable in every state, FAULT included; it grows
+whenever polling stops, for any reason.
 """
 
 import operator
 import threading
+import time
 
 from pymodbus.client import ModbusTcpClient
 from pymodbus.exceptions import ModbusException
@@ -125,6 +132,8 @@ class VacuumGauge(Device):
         self._reported_pump_mismatch = ""
         self._last_pushed_pressure = None
         self._poll_failures = 0
+        # time.monotonic() of the last good read; the start until the first.
+        self._last_good_read = time.monotonic()
         self._client = None
         self._thread = None
         # Created before any early return, so delete_device() can always
@@ -152,6 +161,7 @@ class VacuumGauge(Device):
         # memorized PumpStatus), or FAULT with the reason.
         try:
             self._pressure, self._pump = self._read_instrument()
+            self._last_good_read = time.monotonic()
             self.set_state(DevState.ON)
         except (ModbusException, OSError, AttributeError) as e:
             self._drop_connection()
@@ -255,6 +265,7 @@ class VacuumGauge(Device):
 
             self._pressure = pressure
             self._pump = pump
+            self._last_good_read = time.monotonic()
             self._log_pump_mismatch()
 
             if (
@@ -376,6 +387,12 @@ class VacuumGauge(Device):
         # presented as current is worse than no reading at all for
         # anything downstream making decisions on it.
         return self._is_operational()
+
+    @attribute(dtype=float, label="Poll Age", unit="s", format="%.1f")
+    def PollAge(self):
+        # No is_PollAge_allowed: it must be readable in FAULT, where it
+        # shows how long the gauge has been out of contact.
+        return time.monotonic() - self._last_good_read
 
     @attribute(
         dtype=bool,
